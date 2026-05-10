@@ -1,4 +1,5 @@
 ﻿import Image from "next/image";
+import Link from "next/link";
 
 export function HeroSection() {
   return (
@@ -19,8 +20,7 @@ export function HeroSection() {
           READY para todo.
         </p>
         <div className="hero-actions">
-          <button className="btn-primary">Quiero mi dosis →</button>
-          <button className="btn-ghost">Ver la fórmula</button>
+          <Link href="/checkout" className="btn-primary">Quiero mi dosis →</Link>
         </div>
         <div className="hero-stats">
           <div className="stat-item"><span className="stat-num">3G</span><span className="stat-label">Cafeína pura</span></div>
@@ -36,7 +36,7 @@ export function HeroSection() {
           <div className="product-card">
             <div className="power-badge">POWER</div>
             <div className="skull-container">
-              <Image className="skull-svg" src="/assets/img/mcbMain.png" alt="The Mother Coffee Baby" width={286} height={286} priority />
+              <Image className="skull-svg" src="/assets/img/mcb_flotante.png" alt="The Mother Coffee Baby" width={286} height={286} priority />
             </div>
           </div>
           <div className="product-pills">

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 import { CursorLayer } from "@/components/layout/CursorLayer";
@@ -24,11 +24,12 @@ export default function Home() {
     let fx = 0;
     let fy = 0;
     let rafId = 0;
+    let isHovering = false;
 
     const onMouseMove = (e: MouseEvent) => {
       mx = e.clientX;
       my = e.clientY;
-      cursor.style.transform = `translate(${mx - 8}px, ${my - 8}px)`;
+      cursor.style.transform = `translate(${mx - 6}px, ${my - 6}px) scale(${isHovering ? 2 : 1})`;
     };
 
     const animateFollower = () => {
@@ -41,11 +42,14 @@ export default function Home() {
     const enterHandlers: Array<{ el: Element; enter: () => void; leave: () => void }> = [];
     document.querySelectorAll("button, a, .product-item, .benefit-card").forEach((el) => {
       const enter = () => {
-        cursor.style.transform += " scale(2)";
+        isHovering = true;
+        follower.classList.add("cursor-hover");
         follower.style.width = "60px";
         follower.style.height = "60px";
       };
       const leave = () => {
+        isHovering = false;
+        follower.classList.remove("cursor-hover");
         follower.style.width = "40px";
         follower.style.height = "40px";
       };

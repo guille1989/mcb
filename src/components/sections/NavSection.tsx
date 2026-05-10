@@ -1,13 +1,43 @@
-﻿export function NavSection() {
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+
+export function NavSection() {
+  const [open, setOpen] = useState(false);
+
+  const close = () => setOpen(false);
+
   return (
-    <nav>
-      <div className="nav-logo">THE MOTHER COFFEE BABY</div>
-      <ul className="nav-links">
-        <li><a href="#products">Productos</a></li>
-        <li><a href="#formula">La Fórmula</a></li>
-        <li><a href="#story">Historia</a></li>
-      </ul>
-      <button className="nav-cta">Comprar ahora</button>
-    </nav>
+    <>
+      <nav>
+        <div className="nav-logo">THE MOTHER COFFEE BABY</div>
+        <ul className="nav-links">
+          <li><a href="#products">Productos</a></li>
+          <li><a href="#formula">La Fórmula</a></li>
+          <li><a href="#story">Historia</a></li>
+        </ul>
+        <Link href="/checkout" className="nav-cta">Comprar ahora</Link>
+        <button
+          className={`nav-hamburger${open ? " open" : ""}`}
+          onClick={() => setOpen(!open)}
+          aria-label={open ? "Cerrar menú" : "Abrir menú"}
+          aria-expanded={open}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+      </nav>
+
+      <div className={`nav-mobile-overlay${open ? " open" : ""}`} aria-hidden={!open}>
+        <ul className="nav-links">
+          <li><a href="#products" onClick={close}>Productos</a></li>
+          <li><a href="#formula" onClick={close}>La Fórmula</a></li>
+          <li><a href="#story" onClick={close}>Historia</a></li>
+        </ul>
+        <Link href="/checkout" className="btn-primary" onClick={close}>Comprar ahora →</Link>
+      </div>
+    </>
   );
 }
