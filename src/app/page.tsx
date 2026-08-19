@@ -2,15 +2,13 @@
 
 import { useEffect } from "react";
 import { CursorLayer } from "@/components/layout/CursorLayer";
-import { BenefitsSection } from "@/components/sections/BenefitsSection";
-import { CtaSection } from "@/components/sections/CtaSection";
-import { FooterSection } from "@/components/sections/FooterSection";
-import { FormulaSection } from "@/components/sections/FormulaSection";
 import { HeroSection } from "@/components/sections/HeroSection";
 import { MarqueeSection } from "@/components/sections/MarqueeSection";
-import { NavSection } from "@/components/sections/NavSection";
-import { ProductsSection } from "@/components/sections/ProductsSection";
-import { TestimonialsSection } from "@/components/sections/TestimonialsSection";
+
+// Simplified landing for now — the header (NavSection) and the sections below the
+// marquee (Benefits, Products, Formula, Testimonials, Cta, Footer) are still in
+// src/components/sections, just not rendered here. Re-add their imports and JSX
+// below to bring them back.
 
 export default function Home() {
   useEffect(() => {
@@ -89,15 +87,8 @@ export default function Home() {
   return (
     <>
       <CursorLayer />
-      <NavSection />
       <HeroSection />
       <MarqueeSection />
-      <BenefitsSection />
-      <ProductsSection />
-      <FormulaSection />
-      <TestimonialsSection />
-      <CtaSection />
-      <FooterSection />
     </>
   );
 }

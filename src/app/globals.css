@@ -237,7 +237,7 @@ nav::before {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 110px 60px 50px 80px;
+  padding: 88px 60px 40px 80px;
   position: relative;
   z-index: 2;
 }
@@ -254,7 +254,7 @@ nav::before {
   text-transform: uppercase;
   color: var(--yellow);
   width: fit-content;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
   animation: fadeUp 1s ease 0.2s both;
 }
 
@@ -274,7 +274,7 @@ nav::before {
 
 .hero-headline {
   font-family: var(--font-bebas), 'Bebas Neue', sans-serif;
-  font-size: clamp(72px, 8vw, 120px);
+  font-size: clamp(56px, 6vw, 96px);
   line-height: 0.92;
   letter-spacing: -1px;
   color: var(--white);
@@ -307,7 +307,7 @@ nav::before {
   font-size: 13px;
   line-height: 1.85;
   opacity: 0.65;
-  margin-top: 32px;
+  margin-top: 18px;
   max-width: 380px;
   animation: fadeUp 1s ease 0.6s both;
 }
@@ -315,7 +315,7 @@ nav::before {
 .hero-actions {
   display: flex;
   gap: 20px;
-  margin-top: 48px;
+  margin-top: 28px;
   align-items: center;
   animation: fadeUp 1s ease 0.8s both;
   flex-wrap: wrap;
@@ -388,8 +388,8 @@ nav::before {
 .hero-stats {
   display: flex;
   gap: 40px;
-  margin-top: 60px;
-  padding-top: 40px;
+  margin-top: 30px;
+  padding-top: 22px;
   border-top: 1px solid rgba(255,255,255,0.08);
   animation: fadeUp 1s ease 1s both;
   flex-wrap: wrap;
@@ -1333,4 +1333,5 @@ footer {
 
   .section-title { margin-bottom: 48px; }
 }
+
 
