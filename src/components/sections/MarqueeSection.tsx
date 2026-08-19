@@ -2,7 +2,7 @@
   "Café Colombiano",
   "Energía Real",
   "Sin Crash",
-  "3G Cafeína Pura",
+  "Selección Premium",
   "100% Especialidad",
   "Born Brutal",
   "The Mother Coffee Baby",

@@ -201,7 +201,8 @@ nav::before {
 
 /* HERO */
 .hero {
-  min-height: 100vh;
+  /* Leaves room for the marquee strip right after it, so it peeks into view without scrolling. */
+  min-height: calc(100vh - 74px);
   display: grid;
   grid-template-columns: 1fr 1fr;
   position: relative;
@@ -236,7 +237,7 @@ nav::before {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 160px 60px 80px 80px;
+  padding: 110px 60px 50px 80px;
   position: relative;
   z-index: 2;
 }
@@ -1241,7 +1242,7 @@ footer {
 @media (max-width: 768px) {
   /* Nav: hide links, show hamburger */
   nav { padding: 18px 24px; }
-  .nav-links { display: none; }
+  .nav-desktop-links { display: none; }
   .nav-cta { display: none; }
   .nav-hamburger { display: flex; }
 
@@ -1332,3 +1333,4 @@ footer {
 
   .section-title { margin-bottom: 48px; }
 }
+

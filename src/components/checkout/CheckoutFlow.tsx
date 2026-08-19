@@ -2,18 +2,27 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Fragment } from "react";
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
-const PRODUCTS = [
-  { id: 1, name: "MCB BOLSA",     subtitle: "1000g",  desc: "Café molido de origen colombiano",    price: 18.99, image: "/assets/img/products/mcb_bolsa_1000.png" },
-  { id: 2, name: "MCB PERSONAL",  subtitle: "10 und", desc: "Monodosis · café de especialidad",    price: 12.99, image: "/assets/img/products/mcb_personal_10.png" },
-  { id: 3, name: "MCB LÍQUIDO",   subtitle: "250ml",  desc: "Concentrado líquido · Producto de Colombia", price: 14.99, image: "/assets/img/products/mcb_liquido_250.png" },
-  { id: 4, name: "MCB LÍQUIDO",   subtitle: "500ml",  desc: "Concentrado líquido · Producto de Colombia", price: 24.99, image: "/assets/img/products/mcb_liquido_500.png" },
+const SACHET_OPTIONS = [
+  { id: 1, qty: 10, price: 10.0, tag: "PRUEBA" },
+  { id: 2, qty: 15, price: 15.0, tag: null },
+  { id: 3, qty: 20, price: 20.0, tag: "POPULAR" },
+  { id: 4, qty: 30, price: 30.0, tag: "MÁXIMA" },
+] as const;
+
+const ORIGINS = [
+  { id: "huila", name: "HUILA", color: "#FFD000", altitude: "1.800 m", process: "LAVADO", notes: "CARAMELO · CÍTRICO", sca: "86+ SCA", image: "/assets/img/products/sachetDoble.png" },
+  { id: "tolima", name: "TOLIMA", color: "#FF1F8E", altitude: "1.950 m", process: "HONEY", notes: "CEREZA · CACAO", sca: "87+ SCA", image: undefined },
+  { id: "cauca", name: "CAUCA", color: "#FAFAFA", altitude: "1.750 m", process: "NATURAL", notes: "PANELA · FRUTOS ROJOS", sca: "85+ SCA", image: undefined },
 ] as const;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type Product = typeof PRODUCTS[number];
+type SachetOption = typeof SACHET_OPTIONS[number];
+type OriginId = typeof ORIGINS[number]["id"];
+type OriginCounts = Record<OriginId, number>;
+const ORIGIN_COUNTS_EMPTY: OriginCounts = { huila: 0, tolima: 0, cauca: 0 };
 type CartItem = { productId: number; name: string; subtitle: string; price: number; qty: number; image: string };
 type ShippingData = { name: string; phone: string; email: string; country: string; department: string; city: string; address: string; apt: string; postalCode: string; notes: string };
 type Errors = Partial<Record<keyof ShippingData, string>>;
@@ -53,35 +62,29 @@ function LockIcon() {
 }
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
-function ProgressBar({ step }: { step: 1 | 2 }) {
+const PROGRESS_LABELS = ["Elige tu dosis", "Elige tu café", "Envío"];
+
+function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
   return (
     <div className="co-progress">
-      <div className={`co-prog-step${step >= 1 ? " co-prog-step--on" : ""}`}>
-        <div className="co-prog-dot">
-          {step >= 1 ? <Bolt size={11} color="#0a0a0a" /> : <span>1</span>}
-        </div>
-        <span className="co-prog-label">Elige tu arma</span>
-      </div>
-      <div className="co-prog-line">
-        <div className="co-prog-line-fill" style={{ width: step === 2 ? "100%" : "0%" }} />
-      </div>
-      <div className={`co-prog-step${step >= 2 ? " co-prog-step--on" : ""}`}>
-        <div className="co-prog-dot">
-          {step >= 2 ? <Bolt size={11} color="#0a0a0a" /> : <span>2</span>}
-        </div>
-        <span className="co-prog-label">Envío</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Qty Stepper ──────────────────────────────────────────────────────────────
-function QtyStepper({ qty, onDec, onInc }: { qty: number; onDec: () => void; onInc: () => void }) {
-  return (
-    <div className="co-stepper">
-      <button className="co-stepper-btn" onClick={onDec} aria-label="Restar">−</button>
-      <span className="co-stepper-num">{qty}</span>
-      <button className="co-stepper-btn co-stepper-btn--inc" onClick={onInc} aria-label="Sumar">+</button>
+      {PROGRESS_LABELS.map((label, i) => {
+        const n = i + 1;
+        return (
+          <Fragment key={n}>
+            {i > 0 && (
+              <div className="co-prog-line">
+                <div className="co-prog-line-fill" style={{ width: step >= n ? "100%" : "0%" }} />
+              </div>
+            )}
+            <div className={`co-prog-step${step >= n ? " co-prog-step--on" : ""}`}>
+              <div className="co-prog-dot">
+                {step >= n ? <Bolt size={11} color="#0a0a0a" /> : <span>{n}</span>}
+              </div>
+              <span className="co-prog-label">{label}</span>
+            </div>
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -133,88 +136,156 @@ function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Disp
 
 // ─── Step 1 ───────────────────────────────────────────────────────────────────
 function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; onNext: () => void }) {
-  const getQty = (id: number) => cart.find((c) => c.productId === id)?.qty ?? 0;
+  const selectedId = cart[0]?.productId ?? null;
 
-  const updateQty = useCallback((product: Product, delta: number) => {
-    setCart((prev) => {
-      const existing = prev.find((c) => c.productId === product.id);
-      if (!existing) {
-        if (delta < 1) return prev;
-        return [...prev, { productId: product.id, name: product.name, subtitle: product.subtitle, price: product.price, qty: 1, image: product.image }];
-      }
-      const newQty = existing.qty + delta;
-      if (newQty <= 0) return prev.filter((c) => c.productId !== product.id);
-      return prev.map((c) => c.productId === product.id ? { ...c, qty: newQty } : c);
-    });
+  const select = useCallback((option: SachetOption) => {
+    setCart([{
+      productId: option.id,
+      name: "MCB PERSONAL",
+      subtitle: `${option.qty} sachets`,
+      price: option.price,
+      qty: 1,
+      image: "/assets/img/products/mcb_personal_10.png",
+    }]);
   }, [setCart]);
 
-  const totalItems = cart.reduce((s, c) => s + c.qty, 0);
-  const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
-
   return (
-    <div className="co-step1">
-      <div className="co-s1-header">
-        <div className="co-s1-title-row">
-          <Bolt size={32} />
-          <h1 className="co-title">ELIGE TU ARMA</h1>
-          <Bolt size={32} />
-        </div>
-        <p className="co-s1-sub">Selecciona tus productos y cantidades</p>
-      </div>
-
-      <div className="co-products-grid">
-        {PRODUCTS.map((product) => {
-          const qty = getQty(product.id);
-          const selected = qty > 0;
-          return (
-            <div key={product.id} className={`co-card${selected ? " co-card--on" : ""}`}>
-              <div className="co-card-img">
-                <Image
-                  src={product.image}
-                  alt={product.name}
-                  fill
-                  sizes="(max-width: 600px) 50vw, 25vw"
-                  style={{ objectFit: "contain" }}
-                />
-                {selected && (
-                  <div className="co-card-badge">
-                    <SkullIcon size={12} /><span>{qty}</span>
-                  </div>
-                )}
-              </div>
-              <div className="co-card-body">
-                <div>
-                  <div className="co-card-name">{product.name}</div>
-                  <div className="co-card-sub">{product.subtitle}</div>
-                  <div className="co-card-desc">{product.desc}</div>
-                </div>
-                <div className="co-card-footer">
-                  <span className="co-card-price">€{product.price.toFixed(2)}</span>
-                  <QtyStepper qty={qty} onDec={() => updateQty(product, -1)} onInc={() => updateQty(product, 1)} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className={`co-cart-bar${totalItems === 0 ? " co-cart-bar--empty" : ""}`}>
-        <div className="co-cart-info">
-          <SkullIcon size={32} />
-          <div>
-            <div className="co-cart-count">{totalItems} {totalItems === 1 ? "producto" : "productos"}</div>
-            <div className="co-cart-total">€{totalPrice.toFixed(2)}</div>
+    <div className="co-step1 co-step1--single">
+      <div className="co-single-left">
+        <div className="co-s1-header">
+          <div className="co-s1-title-row">
+            <Bolt size={32} />
+            <h1 className="co-title">ELIGE TU DOSIS</h1>
+            <Bolt size={32} />
           </div>
+          <p className="co-s1-sub">MCB Personal · Monodosis de café de especialidad</p>
         </div>
-        <button className="co-cta-btn" onClick={onNext} disabled={totalItems === 0}>
+
+        <div className="co-sachet-grid">
+          {SACHET_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              className={`co-sachet-btn${selectedId === option.id ? " co-sachet-btn--on" : ""}`}
+              onClick={() => select(option)}
+            >
+              {option.tag && <span className="co-sachet-tag">{option.tag}</span>}
+              <span className="co-sachet-num">{option.qty}</span>
+              <span className="co-sachet-label">sachets</span>
+              <span className="co-sachet-price">€{option.price.toFixed(2)}</span>
+            </button>
+          ))}
+        </div>
+
+        <button className="co-cta-btn co-single-cta" onClick={onNext} disabled={selectedId === null}>
           Continuar <Bolt size={16} color="#0a0a0a" />
         </button>
+      </div>
+
+      <div className="co-single-right">
+        <Image
+          src="/assets/img/products/sachetsIndi.png"
+          alt="MCB Personal — sachets Huila"
+          fill
+          sizes="(max-width: 900px) 100vw, 50vw"
+          style={{ objectFit: "contain", transform: "scale(1.3)" }}
+          priority
+        />
       </div>
     </div>
   );
 }
 
 // ─── Step 2 ───────────────────────────────────────────────────────────────────
+function StepOrigin({ totalSachets, counts, setCounts, onBack, onNext }: {
+  totalSachets: number;
+  counts: OriginCounts;
+  setCounts: React.Dispatch<React.SetStateAction<OriginCounts>>;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const used = ORIGINS.reduce((s, o) => s + counts[o.id], 0);
+  const remaining = totalSachets - used;
+
+  const bump = (id: OriginId, delta: number) => {
+    if (delta > 0 && remaining <= 0) return;
+    setCounts((prev) => ({ ...prev, [id]: Math.max(0, prev[id] + delta) }));
+  };
+
+  return (
+    <div className="co-step1 co-step-origin">
+      <div className="co-s1-header">
+        <button className="co-back-btn co-origin-back" onClick={onBack}>← Volver</button>
+        <div className="co-s1-title-row">
+          <Bolt size={32} />
+          <h1 className="co-title">ELIGE TU CAFÉ</h1>
+          <Bolt size={32} />
+        </div>
+        <p className="co-s1-sub">
+          {remaining > 0
+            ? <>{remaining === 1 ? "Falta" : "Faltan"} <span className="co-origin-remaining">{remaining}</span> de {totalSachets} sachets</>
+            : <span className="co-origin-remaining">¡Dosis completa! {totalSachets} sachets repartidos</span>}
+        </p>
+        <div className="co-coffee-progress">
+          <div className="co-coffee-progress-fill" style={{ width: `${totalSachets ? (used / totalSachets) * 100 : 0}%` }} />
+        </div>
+      </div>
+
+      <div className="co-coffee-grid">
+        {ORIGINS.map((origin) => {
+          const count = counts[origin.id];
+          const on = count > 0;
+          return (
+            <div
+              key={origin.id}
+              className={`co-coffee-card${on ? " co-coffee-card--on" : ""}`}
+              style={on ? { borderColor: origin.color, boxShadow: `0 0 0 1px ${origin.color}55, 0 16px 40px -20px ${origin.color}88` } : undefined}
+            >
+              <div className="co-coffee-visual">
+                {origin.image ? (
+                  <Image src={origin.image} alt={origin.name} fill sizes="180px" style={{ objectFit: "contain", transform: "scale(1.5)" }} />
+                ) : (
+                  <div className="co-coffee-visual-placeholder" style={{ borderColor: origin.color }}>
+                    <SkullIcon size={40} />
+                    <span style={{ color: origin.color }}>{origin.sca}</span>
+                  </div>
+                )}
+              </div>
+              <h3 className="co-coffee-name" style={{ color: on ? origin.color : undefined }}>{origin.name}</h3>
+              <div className="co-coffee-meta">{origin.altitude} · {origin.process}</div>
+              <div className="co-coffee-stepper">
+                <button className="co-coffee-step-btn" onClick={() => bump(origin.id, -1)} disabled={count === 0} aria-label={`Quitar ${origin.name}`}>−</button>
+                <span className="co-coffee-step-num" style={{ color: on ? origin.color : undefined }}>{count}</span>
+                <button
+                  className="co-coffee-step-btn co-coffee-step-btn--inc"
+                  onClick={() => bump(origin.id, 1)}
+                  disabled={remaining <= 0}
+                  style={{ borderColor: origin.color, color: origin.color }}
+                  aria-label={`Agregar ${origin.name}`}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="co-coffee-summary">
+        {ORIGINS.map((origin) => (
+          <span key={origin.id} className="co-coffee-summary-item">
+            <span style={{ color: counts[origin.id] > 0 ? origin.color : undefined }}>{origin.name}</span> · {counts[origin.id]}
+          </span>
+        ))}
+      </div>
+
+      <button className="co-cta-btn co-single-cta" onClick={onNext} disabled={remaining !== 0}>
+        Continuar <Bolt size={16} color="#0a0a0a" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Step 3 ───────────────────────────────────────────────────────────────────
 function validate(s: ShippingData): Errors {
   const e: Errors = {};
   if (!s.name.trim())       e.name       = "El nombre es requerido";
@@ -246,8 +317,8 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
-function StepShipping({ cart, setCart, shipping, setShipping, onBack }: {
-  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
+function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }: {
+  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -260,7 +331,7 @@ function StepShipping({ cart, setCart, shipping, setShipping, onBack }: {
     const errs = validate(shipping);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    const order = { cart, shipping };
+    const order = { cart, origins, shipping };
     console.log("ORDER →", JSON.stringify(order, null, 2));
     alert("¡Pedido registrado! Revisa la consola (F12) para ver los detalles.");
   };
@@ -358,13 +429,24 @@ function StepShipping({ cart, setCart, shipping, setShipping, onBack }: {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export function CheckoutFlow() {
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [origins, setOrigins] = useState<OriginCounts>(ORIGIN_COUNTS_EMPTY);
   const [shipping, setShipping] = useState<ShippingData>(SHIPPING_EMPTY);
 
+  const totalSachets = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
+  const originsUsed = ORIGINS.reduce((s, o) => s + origins[o.id], 0);
+
   useEffect(() => {
-    if (step === 2 && cart.length === 0) setStep(1);
-  }, [cart, step]);
+    if (step >= 2 && cart.length === 0) setStep(1);
+    else if (step === 3 && originsUsed !== totalSachets) setStep(2);
+  }, [cart, step, originsUsed, totalSachets]);
+
+  // Selecting a different dose resets the origin mix so it can't exceed the new total.
+  const setCartAndResetOrigins: React.Dispatch<React.SetStateAction<CartItem[]>> = (value) => {
+    setOrigins(ORIGIN_COUNTS_EMPTY);
+    setCart(value);
+  };
 
   return (
     <div className="co-root">
@@ -374,9 +456,27 @@ export function CheckoutFlow() {
         <div className="co-topbar-spacer" />
       </div>
       <div key={step} className="co-content">
-        {step === 1 && <StepProducts cart={cart} setCart={setCart} onNext={() => setStep(2)} />}
-        {step === 2 && <StepShipping cart={cart} setCart={setCart} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />}
+        {step === 1 && (
+          <StepProducts
+            cart={cart}
+            setCart={setCartAndResetOrigins}
+            onNext={() => setStep(2)}
+          />
+        )}
+        {step === 2 && (
+          <StepOrigin
+            totalSachets={totalSachets}
+            counts={origins}
+            setCounts={setOrigins}
+            onBack={() => setStep(1)}
+            onNext={() => setStep(3)}
+          />
+        )}
+        {step === 3 && (
+          <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(2)} />
+        )}
       </div>
     </div>
   );
 }
+

@@ -23,7 +23,7 @@ export function HeroSection() {
           <Link href="/checkout" className="btn-primary">Quiero mi dosis →</Link>
         </div>
         <div className="hero-stats">
-          <div className="stat-item"><span className="stat-num">3G</span><span className="stat-label">Cafeína pura</span></div>
+          <div className="stat-item"><span className="stat-num">PREMIUM</span><span className="stat-label">Selección de granos</span></div>
           <div className="stat-item"><span className="stat-num">0</span><span className="stat-label">Sin crash</span></div>
           <div className="stat-item"><span className="stat-num">100%</span><span className="stat-label">Colombia</span></div>
         </div>
@@ -40,7 +40,7 @@ export function HeroSection() {
             </div>
           </div>
           <div className="product-pills">
-            <span className="pill">3g cafeína</span>
+            <span className="pill">café colombiano</span>
             <span className="pill">energía real</span>
             <span className="pill">sin crash</span>
           </div>

@@ -20,6 +20,17 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: "The Mother Coffee Baby",
   description: "Café colombiano de especialidad — energía brutal sin límites",
+  openGraph: {
+    title: "The Mother Coffee Baby",
+    description: "Café colombiano de especialidad — energía brutal sin límites",
+    type: "website",
+    locale: "es_ES",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "The Mother Coffee Baby",
+    description: "Café colombiano de especialidad — energía brutal sin límites",
+  },
 };
 
 export default function RootLayout({
