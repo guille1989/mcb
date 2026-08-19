@@ -18,16 +18,46 @@ const ORIGINS = [
   { id: "cauca", name: "CAUCA", color: "#FAFAFA", altitude: "1.750 m", process: "NATURAL", notes: "PANELA · FRUTOS ROJOS", sca: "85+ SCA", image: undefined },
 ] as const;
 
+const PHONE_COUNTRIES = [
+  { iso: "CO", name: "Colombia", code: "+57" },
+  { iso: "MX", name: "México", code: "+52" },
+  { iso: "AR", name: "Argentina", code: "+54" },
+  { iso: "CL", name: "Chile", code: "+56" },
+  { iso: "PE", name: "Perú", code: "+51" },
+  { iso: "EC", name: "Ecuador", code: "+593" },
+  { iso: "VE", name: "Venezuela", code: "+58" },
+  { iso: "UY", name: "Uruguay", code: "+598" },
+  { iso: "PY", name: "Paraguay", code: "+595" },
+  { iso: "BO", name: "Bolivia", code: "+591" },
+  { iso: "PA", name: "Panamá", code: "+507" },
+  { iso: "CR", name: "Costa Rica", code: "+506" },
+  { iso: "GT", name: "Guatemala", code: "+502" },
+  { iso: "SV", name: "El Salvador", code: "+503" },
+  { iso: "HN", name: "Honduras", code: "+504" },
+  { iso: "NI", name: "Nicaragua", code: "+505" },
+  { iso: "DO", name: "República Dominicana", code: "+1" },
+  { iso: "PR", name: "Puerto Rico", code: "+1" },
+  { iso: "US", name: "Estados Unidos", code: "+1" },
+  { iso: "CA", name: "Canadá", code: "+1" },
+  { iso: "ES", name: "España", code: "+34" },
+  { iso: "PT", name: "Portugal", code: "+351" },
+  { iso: "FR", name: "Francia", code: "+33" },
+  { iso: "DE", name: "Alemania", code: "+49" },
+  { iso: "IT", name: "Italia", code: "+39" },
+  { iso: "GB", name: "Reino Unido", code: "+44" },
+  { iso: "BR", name: "Brasil", code: "+55" },
+] as const;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 type SachetOption = typeof SACHET_OPTIONS[number];
 type OriginId = typeof ORIGINS[number]["id"];
 type OriginCounts = Record<OriginId, number>;
 const ORIGIN_COUNTS_EMPTY: OriginCounts = { huila: 0, tolima: 0, cauca: 0 };
 type CartItem = { productId: number; name: string; subtitle: string; price: number; qty: number; image: string };
-type ShippingData = { name: string; phone: string; email: string; country: string; department: string; city: string; address: string; apt: string; postalCode: string; notes: string };
+type ShippingData = { name: string; phone: string; phoneIso: string; email: string; country: string; department: string; city: string; address: string; apt: string; postalCode: string; notes: string };
 type Errors = Partial<Record<keyof ShippingData, string>>;
 
-const SHIPPING_EMPTY: ShippingData = { name: "", phone: "", email: "", country: "Colombia", department: "", city: "", address: "", apt: "", postalCode: "", notes: "" };
+const SHIPPING_EMPTY: ShippingData = { name: "", phone: "", phoneIso: "", email: "", country: "", department: "", city: "", address: "", apt: "", postalCode: "", notes: "" };
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
 function Bolt({ size = 20, color = "#F5C400" }: { size?: number; color?: string }) {
@@ -289,11 +319,12 @@ function StepOrigin({ totalSachets, counts, setCounts, onBack, onNext }: {
 function validate(s: ShippingData): Errors {
   const e: Errors = {};
   if (!s.name.trim())       e.name       = "El nombre es requerido";
-  if (!s.phone.trim())      e.phone      = "El teléfono es requerido";
+  if (!s.phoneIso)          e.phone      = "Selecciona el país de tu teléfono";
+  else if (!s.phone.trim()) e.phone      = "El teléfono es requerido";
   if (!s.email.trim())      e.email      = "El email es requerido";
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email)) e.email = "Email inválido";
   if (!s.country.trim())    e.country    = "El país es requerido";
-  if (!s.department.trim()) e.department = "El departamento es requerido";
+  if (!s.department.trim()) e.department = "Este campo es requerido";
   if (!s.city.trim())       e.city       = "La ciudad es requerida";
   if (!s.address.trim())    e.address    = "La dirección es requerida";
   return e;
@@ -374,7 +405,30 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
             <div className="co-section-label"><Bolt size={15} /> Datos de contacto</div>
             <div className="co-fields-grid">
               <Field label="Nombre completo" name="name" value={shipping.name} onChange={set("name")} error={errors.name} placeholder="Tu nombre completo" />
-              <Field label="Teléfono" name="phone" value={shipping.phone} onChange={set("phone")} error={errors.phone} placeholder="300 123 4567" prefix="+57" type="tel" />
+              <div className="co-field">
+                <label className="co-label">Teléfono</label>
+                <div className={`co-input-wrap${errors.phone ? " co-input-wrap--err" : ""}`}>
+                  <select
+                    className="co-phone-select"
+                    value={shipping.phoneIso}
+                    onChange={(e) => set("phoneIso")(e.target.value)}
+                    aria-label="Código de país"
+                  >
+                    <option value="" disabled>País</option>
+                    {PHONE_COUNTRIES.map((c) => (
+                      <option key={c.iso} value={c.iso}>{c.code} {c.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="tel"
+                    value={shipping.phone}
+                    onChange={(e) => set("phone")(e.target.value)}
+                    placeholder="Número de teléfono"
+                    className="co-input"
+                  />
+                </div>
+                {errors.phone && <span className="co-err-msg">{errors.phone}</span>}
+              </div>
               <Field label="Email" name="email" value={shipping.email} onChange={set("email")} error={errors.email} placeholder="tu@email.com" type="email" />
             </div>
           </div>
@@ -383,8 +437,8 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
           <div className="co-form-section">
             <div className="co-section-label"><Bolt size={15} /> Dirección de envío</div>
             <div className="co-fields-grid">
-              <Field label="País" name="country" value={shipping.country} onChange={set("country")} error={errors.country} placeholder="Colombia" />
-              <Field label="Departamento" name="department" value={shipping.department} onChange={set("department")} error={errors.department} placeholder="Bogotá D.C." />
+              <Field label="País" name="country" value={shipping.country} onChange={set("country")} error={errors.country} placeholder="Tu país" />
+              <Field label="Estado / Provincia / Departamento" name="department" value={shipping.department} onChange={set("department")} error={errors.department} placeholder="Según tu país" />
               <Field label="Ciudad" name="city" value={shipping.city} onChange={set("city")} error={errors.city} placeholder="Tu ciudad" />
               <Field label="Dirección" name="address" value={shipping.address} onChange={set("address")} error={errors.address} placeholder="Calle 123 #45-67" />
               <Field label="Apartamento / Complemento" name="apt" value={shipping.apt} onChange={set("apt")} placeholder="Apto 301, Torre B…" optional />
@@ -479,4 +533,5 @@ export function CheckoutFlow() {
     </div>
   );
 }
+
 

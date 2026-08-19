@@ -596,6 +596,25 @@
   align-items: center;
 }
 
+.co-phone-select {
+  padding: 0 10px;
+  font-size: 11px;
+  font-family: var(--font-space), 'Space Mono', monospace;
+  color: var(--white);
+  opacity: 0.75;
+  background: transparent;
+  border: none;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  outline: none;
+  align-self: stretch;
+  max-width: 90px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.co-phone-select:focus { opacity: 1; }
+.co-phone-select option { background: var(--black); color: var(--white); }
+
 .co-input {
   flex: 1;
   background: transparent;
