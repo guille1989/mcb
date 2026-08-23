@@ -166,9 +166,12 @@
 /* Single-product layout: sachet selector (left) + video (right) */
 .co-step1--single {
   display: flex;
-  flex-direction: column-reverse;
-  overflow: visible;
-  padding-bottom: 0;
+  /* Normal (not reversed) direction — column-reverse breaks native scrolling
+     (scrollTop stops responding) in several browsers. The video is put on top
+     visually via `order` on .co-single-right instead, so scrolling stays intact. */
+  flex-direction: column;
+  overflow-y: auto;
+  padding-bottom: 24px;
 }
 
 @media (min-width: 900px) {
@@ -193,10 +196,11 @@
   flex-shrink: 0;
   background: var(--black);
   overflow: hidden;
+  order: -1;
 }
 
 @media (min-width: 900px) {
-  .co-single-right { flex: 1; height: auto; }
+  .co-single-right { flex: 1; height: auto; order: 0; }
 }
 
 /* Sachet selector */
