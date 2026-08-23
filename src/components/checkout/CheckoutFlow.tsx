@@ -6,10 +6,10 @@ import { useState, useCallback, useEffect, Fragment } from "react";
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 const SACHET_OPTIONS = [
-  { id: 1, qty: 10, price: 10.0, tag: "PRUEBA" },
-  { id: 2, qty: 15, price: 15.0, tag: null },
-  { id: 3, qty: 20, price: 20.0, tag: "POPULAR" },
-  { id: 4, qty: 30, price: 30.0, tag: "MÁXIMA" },
+  { id: 1, qty: 10, price: 25.0, tag: "PRUEBA" },
+  { id: 2, qty: 15, price: 37.5, tag: null },
+  { id: 3, qty: 20, price: 50.0, tag: "POPULAR" },
+  { id: 4, qty: 30, price: 75.0, tag: "MÁXIMA" },
 ] as const;
 
 const ORIGINS = [
