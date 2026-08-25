@@ -13,8 +13,8 @@ export function isWompiSandbox() {
 
 export function getWompiPublicKey() {
   return SANDBOX
-    ? process.env.NEXT_PUBLIC_TEST_WOMPI_PUBLIC_KEY
-    : process.env.NEXT_PUBLIC_WOMPI_PUBLIC_KEY;
+    ? process.env.TEST_WOMPI_PUBLIC_KEY
+    : process.env.WOMPI_PUBLIC_KEY;
 }
 
 export function getWompiIntegritySecret() {
