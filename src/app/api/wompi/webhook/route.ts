@@ -27,7 +27,9 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const properties: string[] | undefined = body?.signature?.properties;
   const checksum: string | undefined = body?.signature?.checksum;
-  const timestamp = body?.signature?.timestamp;
+  // Verified against a real Wompi payload: "timestamp" sits at the top level of the
+  // event body, as a sibling of "signature" — not nested inside it.
+  const timestamp = body?.timestamp;
 
   if (!body || !Array.isArray(properties) || !checksum || timestamp === undefined) {
     return NextResponse.json({ error: "Malformed payload" }, { status: 400 });
