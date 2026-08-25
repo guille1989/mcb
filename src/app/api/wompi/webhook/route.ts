@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { getWompiEventsSecret } from "@/lib/wompi";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { sendOrderConfirmationEmail } from "@/lib/email";
 
 function getByPath(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
@@ -69,6 +70,28 @@ export async function POST(req: Request) {
   if (error) {
     console.error("Wompi webhook: failed to update order", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
+  }
+
+  if (transaction.status === "APPROVED") {
+    // Flips confirmation_email_sent false→true, but only for the row that's still
+    // false. If Wompi retries this same event, the second call finds 0 rows matched
+    // (already true) and `claimed` is null — so the email only ever goes out once.
+    const { data: claimed } = await supabase
+      .from("orders")
+      .update({ confirmation_email_sent: true })
+      .eq("reference", transaction.reference)
+      .eq("confirmation_email_sent", false)
+      .select()
+      .maybeSingle();
+
+    if (claimed) {
+      try {
+        await sendOrderConfirmationEmail(claimed);
+      } catch (emailError) {
+        // Don't fail the whole webhook over an email hiccup — the order is already saved.
+        console.error("Wompi webhook: failed to send confirmation email", emailError);
+      }
+    }
   }
 
   return NextResponse.json({ ok: true });
