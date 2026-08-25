@@ -2,7 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useCallback, useEffect, Fragment } from "react";
+import Script from "next/script";
+import { useState, useCallback, useEffect, useContext, createContext, Fragment } from "react";
+
+declare global {
+  interface Window {
+    WidgetCheckout?: new (config: Record<string, unknown>) => {
+      open: (callback: (result: { transaction: { id: string; status: string } }) => void) => void;
+    };
+  }
+}
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 const SACHET_OPTIONS = [
@@ -59,6 +68,39 @@ type Errors = Partial<Record<keyof ShippingData, string>>;
 
 const SHIPPING_EMPTY: ShippingData = { name: "", phone: "", phoneIso: "", email: "", country: "", department: "", city: "", address: "", apt: "", postalCode: "", notes: "" };
 
+// Approximate EUR → COP rate, kept as a constant to update by hand rather than a live API call.
+const FALLBACK_EUR_TO_COP = 3600;
+const EurToCopContext = createContext(FALLBACK_EUR_TO_COP);
+
+function useEurToCopRate() {
+  const [rate, setRate] = useState(FALLBACK_EUR_TO_COP);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/exchange-rate")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && typeof data?.rate === "number") setRate(data.rate);
+      })
+      .catch(() => {}); // keep the fallback rate on any network error
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return rate;
+}
+
+function PriceTag({ eur }: { eur: number }) {
+  const rate = useContext(EurToCopContext);
+  const cop = Math.round(eur * rate).toLocaleString("es-CO");
+  return (
+    <>
+      €{eur.toFixed(2)} <span className="co-price-cop">(≈ ${cop} COP)</span>
+    </>
+  );
+}
+
 // ─── Icons ───────────────────────────────────────────────────────────────────
 function Bolt({ size = 20, color = "#F5C400" }: { size?: number; color?: string }) {
   return (
@@ -92,9 +134,12 @@ function LockIcon() {
 }
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
-const PROGRESS_LABELS = ["Elige tu dosis", "Elige tu café", "Envío"];
+// "Elige tu café" is skipped for now (only Huila is offered), so the bar only shows 2 stops;
+// step 3 (shipping) is mapped to display position 2 here.
+const PROGRESS_LABELS = ["Elige tu dosis", "Envío"];
 
 function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
+  const displayStep = step === 1 ? 1 : 2;
   return (
     <div className="co-progress">
       {PROGRESS_LABELS.map((label, i) => {
@@ -103,12 +148,12 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
           <Fragment key={n}>
             {i > 0 && (
               <div className="co-prog-line">
-                <div className="co-prog-line-fill" style={{ width: step >= n ? "100%" : "0%" }} />
+                <div className="co-prog-line-fill" style={{ width: displayStep >= n ? "100%" : "0%" }} />
               </div>
             )}
-            <div className={`co-prog-step${step >= n ? " co-prog-step--on" : ""}`}>
+            <div className={`co-prog-step${displayStep >= n ? " co-prog-step--on" : ""}`}>
               <div className="co-prog-dot">
-                {step >= n ? <Bolt size={11} color="#0a0a0a" /> : <span>{n}</span>}
+                {displayStep >= n ? <Bolt size={11} color="#0a0a0a" /> : <span>{n}</span>}
               </div>
               <span className="co-prog-label">{label}</span>
             </div>
@@ -152,13 +197,13 @@ function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Disp
                 <button className="co-sum-remove" onClick={() => remove(item.productId)} aria-label="Eliminar">✕</button>
               </div>
             </div>
-            <div className="co-summary-item-price">€{(item.price * item.qty).toFixed(2)}</div>
+            <div className="co-summary-item-price"><PriceTag eur={item.price * item.qty} /></div>
           </div>
         ))}
       </div>
       <div className="co-summary-total">
         <span>Total</span>
-        <span>€{total.toFixed(2)}</span>
+        <span><PriceTag eur={total} /></span>
       </div>
     </div>
   );
@@ -201,7 +246,7 @@ function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: Re
               {option.tag && <span className="co-sachet-tag">{option.tag}</span>}
               <span className="co-sachet-num">{option.qty}</span>
               <span className="co-sachet-label">sachets</span>
-              <span className="co-sachet-price">€{option.price.toFixed(2)}</span>
+              <span className="co-sachet-price"><PriceTag eur={option.price} /></span>
             </button>
           ))}
         </div>
@@ -348,30 +393,136 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
-function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }: {
-  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
+function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, onComplete }: {
+  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void; onComplete: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [widgetReady, setWidgetReady] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [payResult, setPayResult] = useState<{ ok: boolean; message: string; reference?: string } | null>(null);
+  const [wompiConfig, setWompiConfig] = useState<{ publicKey: string; sandbox: boolean } | null>(null);
+  const eurToCopRate = useContext(EurToCopContext);
+
+  useEffect(() => {
+    fetch("/api/wompi/config")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.publicKey) setWompiConfig({ publicKey: data.publicKey, sandbox: data.sandbox });
+      })
+      .catch(() => {});
+  }, []);
 
   const set = (key: keyof ShippingData) => (val: string) =>
     setShipping((prev) => ({ ...prev, [key]: val }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate(shipping);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    const order = { cart, origins, shipping };
-    console.log("ORDER →", JSON.stringify(order, null, 2));
-    alert("¡Pedido registrado! Revisa la consola (F12) para ver los detalles.");
+
+    if (!widgetReady || !window.WidgetCheckout || !wompiConfig) {
+      setPayResult({ ok: false, message: "El widget de pago todavía está cargando, intenta de nuevo en un segundo." });
+      return;
+    }
+
+    setPaying(true);
+    setPayResult(null);
+    try {
+      const phoneCountry = PHONE_COUNTRIES.find((c) => c.iso === shipping.phoneIso);
+      const amountInCents = Math.round(totalPrice * eurToCopRate * 100);
+      const reference = `MCB-${Date.now()}`;
+
+      const sigRes = await fetch("/api/wompi/signature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference, amountInCents, currency: "COP" }),
+      });
+      if (!sigRes.ok) throw new Error("No se pudo preparar el pago");
+      const { signature } = await sigRes.json();
+
+      // Recorded as PENDING now, before the widget even opens, so the order isn't lost
+      // if the customer closes the tab mid-payment — the webhook updates its status later.
+      const orderRes = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference,
+          doseQty,
+          dosePriceEur: totalPrice,
+          amountInCents,
+          origins,
+          shipping,
+        }),
+      });
+      if (!orderRes.ok) throw new Error("No se pudo registrar el pedido");
+
+      const checkout = new window.WidgetCheckout({
+        currency: "COP",
+        amountInCents,
+        reference,
+        publicKey: wompiConfig.publicKey,
+        signature: { integrity: signature },
+        customerData: {
+          email: shipping.email,
+          fullName: shipping.name,
+          phoneNumber: shipping.phone,
+          phoneNumberPrefix: phoneCountry?.code ?? "+57",
+        },
+      });
+
+      checkout.open(async (result) => {
+        const status = result?.transaction?.status;
+        const id = result?.transaction?.id;
+
+        // Don't trust the widget callback alone — re-check server-side against Wompi.
+        let confirmedStatus = status;
+        if (id) {
+          try {
+            const statusRes = await fetch(`/api/wompi/status?id=${id}`);
+            if (statusRes.ok) confirmedStatus = (await statusRes.json()).status;
+          } catch {
+            // fall back to the widget's own reported status
+          }
+        }
+
+        setPaying(false);
+        if (confirmedStatus === "APPROVED") {
+          const order = { cart, origins, shipping, wompiTransactionId: id };
+          console.log("ORDER →", JSON.stringify(order, null, 2));
+          setPayResult({ ok: true, message: "¡Pago aprobado!", reference });
+        } else {
+          setPayResult({ ok: false, message: `El pago no se completó (estado: ${confirmedStatus ?? "desconocido"}). Puedes intentar de nuevo.` });
+        }
+      });
+    } catch (err) {
+      setPaying(false);
+      setPayResult({ ok: false, message: err instanceof Error ? err.message : "Ocurrió un error al iniciar el pago." });
+    }
   };
 
   const totalItems = cart.reduce((s, c) => s + c.qty, 0);
   const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
+  const doseQty = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
+
+  if (payResult?.ok) {
+    return (
+      <div className="co-step2 co-confirmation">
+        <Bolt size={40} />
+        <h1 className="co-title">¡PEDIDO CONFIRMADO!</h1>
+        <p className="co-confirmation-sub">Te escribiremos a {shipping.email} con los detalles del envío.</p>
+        {payResult.reference && <p className="co-confirmation-ref">Referencia: {payResult.reference}</p>}
+        <button className="co-cta-btn" onClick={onComplete}>
+          Volver a la tienda <Bolt size={16} color="#0a0a0a" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="co-step2">
+      <Script src="https://checkout.wompi.co/widget.js" strategy="afterInteractive" onLoad={() => setWidgetReady(true)} />
       <div className="co-s2-header">
         <button className="co-back-btn" onClick={onBack}>← Volver</button>
         <div className="co-s2-title-row">
@@ -387,7 +538,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
               Tu pedido — {totalItems} {totalItems === 1 ? "producto" : "productos"}
             </span>
             <span className="co-summary-toggle-right">
-              €{totalPrice.toFixed(2)} <span className="co-chevron">{summaryOpen ? "▲" : "▼"}</span>
+              <PriceTag eur={totalPrice} /> <span className="co-chevron">{summaryOpen ? "▲" : "▼"}</span>
             </span>
           </button>
           {summaryOpen && (
@@ -458,14 +609,19 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
             />
           </div>
 
-          {/* Payment placeholder */}
+          {/* Payment */}
           <div className="co-payment-ph">
             <LockIcon />
-            <span>Método de pago — próximamente</span>
+            <span>Pago seguro con Wompi{wompiConfig?.sandbox ? " — modo de prueba" : ""}</span>
           </div>
 
-          <button type="submit" className="co-submit-btn">
-            Revisar pedido <Bolt size={18} color="#0a0a0a" />
+          {/* payResult.ok short-circuits into the confirmation screen above, so only the error case reaches here. */}
+          {payResult && !payResult.ok && (
+            <div className="co-pay-result co-pay-result--err">{payResult.message}</div>
+          )}
+
+          <button type="submit" className="co-submit-btn" disabled={paying}>
+            {paying ? "Procesando pago…" : <>Pagar <PriceTag eur={totalPrice} /></>} <Bolt size={18} color="#0a0a0a" />
           </button>
         </form>
 
@@ -487,14 +643,13 @@ export function CheckoutFlow() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [origins, setOrigins] = useState<OriginCounts>(ORIGIN_COUNTS_EMPTY);
   const [shipping, setShipping] = useState<ShippingData>(SHIPPING_EMPTY);
+  const eurToCopRate = useEurToCopRate();
 
   const totalSachets = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
-  const originsUsed = ORIGINS.reduce((s, o) => s + origins[o.id], 0);
 
   useEffect(() => {
     if (step >= 2 && cart.length === 0) setStep(1);
-    else if (step === 3 && originsUsed !== totalSachets) setStep(2);
-  }, [cart, step, originsUsed, totalSachets]);
+  }, [cart, step]);
 
   // Selecting a different dose resets the origin mix so it can't exceed the new total.
   const setCartAndResetOrigins: React.Dispatch<React.SetStateAction<CartItem[]>> = (value) => {
@@ -502,35 +657,54 @@ export function CheckoutFlow() {
     setCart(value);
   };
 
+  // Only one coffee type (Huila) is offered for now, so the origin-picker step (still
+  // fully implemented below, just unused) is skipped: the whole dose goes to Huila
+  // automatically and we jump straight to shipping.
+  const skipToShipping = () => {
+    setOrigins({ ...ORIGIN_COUNTS_EMPTY, huila: totalSachets });
+    setStep(3);
+  };
+
+  const resetOrder = () => {
+    setCart([]);
+    setOrigins(ORIGIN_COUNTS_EMPTY);
+    setShipping(SHIPPING_EMPTY);
+    setStep(1);
+  };
+
   return (
-    <div className="co-root">
-      <div className="co-topbar">
-        <Link href="/" className="co-home-btn">← Volver</Link>
-        <ProgressBar step={step} />
-        <div className="co-topbar-spacer" />
+    <EurToCopContext.Provider value={eurToCopRate}>
+      <div className="co-root">
+        <div className="co-topbar">
+          <Link href="/" className="co-home-btn">← Volver</Link>
+          <ProgressBar step={step} />
+          <div className="co-topbar-spacer" />
+        </div>
+        <div key={step} className="co-content">
+          {step === 1 && (
+            <StepProducts
+              cart={cart}
+              setCart={setCartAndResetOrigins}
+              onNext={skipToShipping}
+            />
+          )}
+          {/* Origin picker (step 2) is skipped for now — only Huila is offered — but kept
+              here, unreachable, so it's ready to switch back on once Tolima/Cauca are live. */}
+          {false && step === 2 && (
+            <StepOrigin
+              totalSachets={totalSachets}
+              counts={origins}
+              setCounts={setOrigins}
+              onBack={() => setStep(1)}
+              onNext={() => setStep(3)}
+            />
+          )}
+          {step === 3 && (
+            <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} onComplete={resetOrder} />
+          )}
+        </div>
       </div>
-      <div key={step} className="co-content">
-        {step === 1 && (
-          <StepProducts
-            cart={cart}
-            setCart={setCartAndResetOrigins}
-            onNext={() => setStep(2)}
-          />
-        )}
-        {step === 2 && (
-          <StepOrigin
-            totalSachets={totalSachets}
-            counts={origins}
-            setCounts={setOrigins}
-            onBack={() => setStep(1)}
-            onNext={() => setStep(3)}
-          />
-        )}
-        {step === 3 && (
-          <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(2)} />
-        )}
-      </div>
-    </div>
+    </EurToCopContext.Provider>
   );
 }
 

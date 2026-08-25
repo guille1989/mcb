@@ -284,6 +284,16 @@
 
 .co-sachet-btn--on .co-sachet-price { color: var(--yellow); opacity: 1; }
 
+.co-price-cop {
+  display: block;
+  font-family: var(--font-space), 'Space Mono', monospace;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+  opacity: 0.45;
+  margin-top: 2px;
+}
+
 .co-single-cta { align-self: flex-start; }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -459,6 +469,29 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.co-confirmation {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 14px;
+  padding: 24px;
+  animation: coFadeUp 0.4s ease both;
+}
+
+.co-confirmation-sub {
+  font-size: 13px;
+  opacity: 0.6;
+  max-width: 420px;
+}
+
+.co-confirmation-ref {
+  font-family: var(--font-space), 'Space Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  opacity: 0.4;
+  margin-bottom: 12px;
 }
 
 .co-s2-header {
@@ -659,11 +692,25 @@
   align-items: center;
   gap: 12px;
   padding: 18px 20px;
-  border: 1px dashed rgba(245,196,0,0.18);
-  color: rgba(255,255,255,0.28);
+  border: 1px solid rgba(245,196,0,0.25);
+  background: rgba(245,196,0,0.04);
+  color: rgba(255,255,255,0.6);
   font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
+}
+
+.co-pay-result {
+  padding: 14px 18px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+
+.co-pay-result--err {
+  color: #E8175D;
+  border-color: rgba(232,23,93,0.4);
+  background: rgba(232,23,93,0.06);
 }
 
 /* Submit */
