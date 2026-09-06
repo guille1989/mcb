@@ -25,6 +25,8 @@ type Order = {
   shipping_postal_code: string | null;
   notes: string | null;
   confirmation_email_sent: boolean;
+  shipped: boolean;
+  shipped_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -74,19 +76,28 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [fetchError, setFetchError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchOrders = useCallback(async () => {
-    const res = await fetch("/api/admin/orders", { cache: "no-store" });
-    if (res.status === 401) {
-      setLoggedIn(false);
-      return;
-    }
-    if (res.ok) {
+    try {
+      const res = await fetch("/api/admin/orders", { cache: "no-store" });
+      if (res.status === 401) {
+        setLoggedIn(false);
+        setFetchError("");
+        return;
+      }
+      if (!res.ok) {
+        setFetchError("No se pudieron cargar los pedidos. Intenta de nuevo en un momento.");
+        return;
+      }
       const data = await res.json();
       setOrders(data.orders ?? []);
       setLastUpdated(new Date());
       setLoggedIn(true);
+      setFetchError("");
+    } catch {
+      setFetchError("No se pudo conectar. Revisa tu conexión.");
     }
   }, []);
 
@@ -132,8 +143,38 @@ export default function AdminPage() {
     setOrders([]);
   };
 
+  const toggleShipped = async (reference: string, shipped: boolean) => {
+    // Optimistic update — the polling loop will correct it if the request fails.
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.reference === reference
+          ? { ...o, shipped, shipped_at: shipped ? new Date().toISOString() : null }
+          : o
+      )
+    );
+    setSelected((prev) =>
+      prev && prev.reference === reference
+        ? { ...prev, shipped, shipped_at: shipped ? new Date().toISOString() : null }
+        : prev
+    );
+    try {
+      const res = await fetch("/api/admin/orders/ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference, shipped }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      fetchOrders();
+    }
+  };
+
   if (loggedIn === null) {
-    return <div className="admin-shell admin-loading">Cargando…</div>;
+    return (
+      <div className="admin-shell admin-loading">
+        {fetchError || "Cargando…"}
+      </div>
+    );
   }
 
   if (!loggedIn) {
@@ -188,6 +229,7 @@ export default function AdminPage() {
                 <th>Total</th>
                 <th>Envío a</th>
                 <th>Correo</th>
+                <th>Enviado</th>
               </tr>
             </thead>
             <tbody>
@@ -211,6 +253,14 @@ export default function AdminPage() {
                       {o.shipping_city}, {o.shipping_country}
                     </td>
                     <td>{o.confirmation_email_sent ? "✅" : "—"}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className={`admin-ship-btn ${o.shipped ? "admin-ship-btn--done" : ""}`}
+                        onClick={() => toggleShipped(o.reference, !o.shipped)}
+                      >
+                        {o.shipped ? "✅ Enviado" : "Marcar enviado"}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -269,6 +319,17 @@ export default function AdminPage() {
               Creado {relativeTime(selected.created_at)} · Actualizado{" "}
               {relativeTime(selected.updated_at)}
             </p>
+
+            <h3>Envío del pedido</h3>
+            <button
+              className={`admin-ship-btn ${selected.shipped ? "admin-ship-btn--done" : ""}`}
+              onClick={() => toggleShipped(selected.reference, !selected.shipped)}
+            >
+              {selected.shipped ? "✅ Enviado" : "Marcar como enviado"}
+            </button>
+            {selected.shipped && selected.shipped_at && (
+              <p className="admin-muted">Marcado {relativeTime(selected.shipped_at)}</p>
+            )}
           </div>
         </div>
       )}

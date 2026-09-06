@@ -236,3 +236,28 @@
 .admin-modal-close:hover {
   opacity: 1;
 }
+
+.admin-ship-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 208, 0, 0.5);
+  color: var(--yellow);
+  border-radius: 3px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-ship-btn:hover {
+  background: rgba(255, 208, 0, 0.1);
+}
+
+.admin-ship-btn--done {
+  border-color: rgba(61, 220, 132, 0.5);
+  color: #3ddc84;
+}
+
+.admin-ship-btn--done:hover {
+  background: rgba(61, 220, 132, 0.1);
+}

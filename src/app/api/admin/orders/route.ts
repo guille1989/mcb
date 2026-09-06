@@ -7,7 +7,7 @@ const ORDER_COLUMNS =
   "reference,status,wompi_transaction_id,dose_qty,dose_price_eur,amount_in_cents_cop," +
   "origin_huila,origin_tolima,origin_cauca,customer_name,customer_email,customer_phone," +
   "customer_phone_country,shipping_country,shipping_department,shipping_city,shipping_address," +
-  "shipping_apt,shipping_postal_code,notes,confirmation_email_sent,created_at,updated_at";
+  "shipping_apt,shipping_postal_code,notes,confirmation_email_sent,shipped,shipped_at,created_at,updated_at";
 
 export async function GET() {
   const cookieStore = await cookies();
