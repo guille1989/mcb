@@ -494,6 +494,17 @@
   margin-bottom: 12px;
 }
 
+.co-confirmation-contact {
+  font-size: 12px;
+  opacity: 0.5;
+  margin-bottom: 24px;
+}
+
+.co-confirmation-contact a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .co-s2-header {
   padding: 20px 24px 0;
   flex-shrink: 0;

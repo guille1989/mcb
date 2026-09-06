@@ -513,6 +513,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
         <h1 className="co-title">¡PEDIDO CONFIRMADO!</h1>
         <p className="co-confirmation-sub">Te escribiremos a {shipping.email} con los detalles del envío.</p>
         {payResult.reference && <p className="co-confirmation-ref">Referencia: {payResult.reference}</p>}
+        <p className="co-confirmation-contact">
+          ¿Dudas? Escríbenos a <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
+        </p>
         <button className="co-cta-btn" onClick={onComplete}>
           Volver a la tienda <Bolt size={16} color="#0a0a0a" />
         </button>

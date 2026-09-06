@@ -49,6 +49,7 @@ export async function sendOrderConfirmationEmail(order: OrderForEmail) {
           ${order.shipping_country}${order.shipping_postal_code ? " " + order.shipping_postal_code : ""}
         </p>
         <p>Te avisaremos cuando tu pedido salga hacia tu dirección.</p>
+        <p style="opacity:0.6; font-size: 13px;">¿Dudas? Escríbenos a <a href="mailto:orders@themothercoffebaby.com" style="color:#FFD000;">orders@themothercoffebaby.com</a></p>
       </div>
     `,
   });
