@@ -1,15 +1,10 @@
-﻿const items = [
-  "Café Colombiano",
-  "Energía Real",
-  "Sin Crash",
-  "Selección Premium",
-  "100% Especialidad",
-  "Born Brutal",
-  "The Mother Coffee Baby",
-];
+"use client";
+
+import { useLocale } from "@/lib/i18n/LocaleContext";
 
 export function MarqueeSection() {
-  const doubled = [...items, ...items];
+  const { t } = useLocale();
+  const doubled = [...t.marquee.items, ...t.marquee.items];
   return (
     <div className="marquee-section">
       <div className="marquee-track" id="marquee">

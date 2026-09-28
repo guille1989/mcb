@@ -9,12 +9,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing reference or shipping data" }, { status: 400 });
   }
 
-  const { reference, doseQty, dosePriceEur, amountInCents, origins, shipping } = body;
+  const { reference, doseQty, dosePriceEur, amountInCents, origins, shipping, locale } = body;
 
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("orders").insert({
     reference,
     status: "PENDING",
+    locale: locale === "en" ? "en" : "es",
     dose_qty: doseQty,
     dose_price_eur: dosePriceEur,
     amount_in_cents_cop: amountInCents,

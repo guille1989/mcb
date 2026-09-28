@@ -4,6 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
 import { useState, useCallback, useEffect, useContext, createContext, Fragment } from "react";
+import { useLocale } from "@/lib/i18n/LocaleContext";
+import type { Dictionary } from "@/lib/i18n/dictionaries";
 
 declare global {
   interface Window {
@@ -15,10 +17,10 @@ declare global {
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 const SACHET_OPTIONS = [
-  { id: 1, qty: 10, price: 25.0, tag: "PRUEBA" },
-  { id: 2, qty: 15, price: 37.5, tag: null },
-  { id: 3, qty: 20, price: 50.0, tag: "POPULAR" },
-  { id: 4, qty: 30, price: 75.0, tag: "MÁXIMA" },
+  { id: 1, qty: 10, price: 25.0, tagKey: "trial" },
+  { id: 2, qty: 15, price: 37.5, tagKey: null },
+  { id: 3, qty: 20, price: 50.0, tagKey: "popular" },
+  { id: 4, qty: 30, price: 75.0, tagKey: "max" },
 ] as const;
 
 const ORIGINS = [
@@ -28,33 +30,33 @@ const ORIGINS = [
 ] as const;
 
 const PHONE_COUNTRIES = [
-  { iso: "CO", name: "Colombia", code: "+57" },
-  { iso: "MX", name: "México", code: "+52" },
-  { iso: "AR", name: "Argentina", code: "+54" },
-  { iso: "CL", name: "Chile", code: "+56" },
-  { iso: "PE", name: "Perú", code: "+51" },
-  { iso: "EC", name: "Ecuador", code: "+593" },
-  { iso: "VE", name: "Venezuela", code: "+58" },
-  { iso: "UY", name: "Uruguay", code: "+598" },
-  { iso: "PY", name: "Paraguay", code: "+595" },
-  { iso: "BO", name: "Bolivia", code: "+591" },
-  { iso: "PA", name: "Panamá", code: "+507" },
-  { iso: "CR", name: "Costa Rica", code: "+506" },
-  { iso: "GT", name: "Guatemala", code: "+502" },
-  { iso: "SV", name: "El Salvador", code: "+503" },
-  { iso: "HN", name: "Honduras", code: "+504" },
-  { iso: "NI", name: "Nicaragua", code: "+505" },
-  { iso: "DO", name: "República Dominicana", code: "+1" },
-  { iso: "PR", name: "Puerto Rico", code: "+1" },
-  { iso: "US", name: "Estados Unidos", code: "+1" },
-  { iso: "CA", name: "Canadá", code: "+1" },
-  { iso: "ES", name: "España", code: "+34" },
-  { iso: "PT", name: "Portugal", code: "+351" },
-  { iso: "FR", name: "Francia", code: "+33" },
-  { iso: "DE", name: "Alemania", code: "+49" },
-  { iso: "IT", name: "Italia", code: "+39" },
-  { iso: "GB", name: "Reino Unido", code: "+44" },
-  { iso: "BR", name: "Brasil", code: "+55" },
+  { iso: "CO", name: "Colombia", nameEn: "Colombia", code: "+57" },
+  { iso: "MX", name: "México", nameEn: "Mexico", code: "+52" },
+  { iso: "AR", name: "Argentina", nameEn: "Argentina", code: "+54" },
+  { iso: "CL", name: "Chile", nameEn: "Chile", code: "+56" },
+  { iso: "PE", name: "Perú", nameEn: "Peru", code: "+51" },
+  { iso: "EC", name: "Ecuador", nameEn: "Ecuador", code: "+593" },
+  { iso: "VE", name: "Venezuela", nameEn: "Venezuela", code: "+58" },
+  { iso: "UY", name: "Uruguay", nameEn: "Uruguay", code: "+598" },
+  { iso: "PY", name: "Paraguay", nameEn: "Paraguay", code: "+595" },
+  { iso: "BO", name: "Bolivia", nameEn: "Bolivia", code: "+591" },
+  { iso: "PA", name: "Panamá", nameEn: "Panama", code: "+507" },
+  { iso: "CR", name: "Costa Rica", nameEn: "Costa Rica", code: "+506" },
+  { iso: "GT", name: "Guatemala", nameEn: "Guatemala", code: "+502" },
+  { iso: "SV", name: "El Salvador", nameEn: "El Salvador", code: "+503" },
+  { iso: "HN", name: "Honduras", nameEn: "Honduras", code: "+504" },
+  { iso: "NI", name: "Nicaragua", nameEn: "Nicaragua", code: "+505" },
+  { iso: "DO", name: "República Dominicana", nameEn: "Dominican Republic", code: "+1" },
+  { iso: "PR", name: "Puerto Rico", nameEn: "Puerto Rico", code: "+1" },
+  { iso: "US", name: "Estados Unidos", nameEn: "United States", code: "+1" },
+  { iso: "CA", name: "Canadá", nameEn: "Canada", code: "+1" },
+  { iso: "ES", name: "España", nameEn: "Spain", code: "+34" },
+  { iso: "PT", name: "Portugal", nameEn: "Portugal", code: "+351" },
+  { iso: "FR", name: "Francia", nameEn: "France", code: "+33" },
+  { iso: "DE", name: "Alemania", nameEn: "Germany", code: "+49" },
+  { iso: "IT", name: "Italia", nameEn: "Italy", code: "+39" },
+  { iso: "GB", name: "Reino Unido", nameEn: "United Kingdom", code: "+44" },
+  { iso: "BR", name: "Brasil", nameEn: "Brazil", code: "+55" },
 ] as const;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -136,13 +138,13 @@ function LockIcon() {
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
 // "Elige tu café" is skipped for now (only Huila is offered), so the bar only shows 2 stops;
 // step 3 (shipping) is mapped to display position 2 here.
-const PROGRESS_LABELS = ["Elige tu dosis", "Envío"];
-
 function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
+  const { t } = useLocale();
   const displayStep = step === 1 ? 1 : 2;
+  const progressLabels = [t.checkout.progress.dose, t.checkout.progress.shipping];
   return (
     <div className="co-progress">
-      {PROGRESS_LABELS.map((label, i) => {
+      {progressLabels.map((label, i) => {
         const n = i + 1;
         return (
           <Fragment key={n}>
@@ -166,6 +168,7 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 }) {
 
 // ─── Order Summary (shared) ───────────────────────────────────────────────────
 function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>> }) {
+  const { t } = useLocale();
   const total = cart.reduce((s, c) => s + c.price * c.qty, 0);
 
   const change = (id: number, delta: number) =>
@@ -191,10 +194,10 @@ function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Disp
               <div className="co-summary-item-name">{item.name}</div>
               <div className="co-summary-item-sub">{item.subtitle}</div>
               <div className="co-summary-item-controls">
-                <button className="co-sum-btn" onClick={() => change(item.productId, -1)} aria-label="Restar">−</button>
+                <button className="co-sum-btn" onClick={() => change(item.productId, -1)} aria-label={t.checkout.shipping.decreaseAria}>−</button>
                 <span className="co-sum-qty">{item.qty}</span>
-                <button className="co-sum-btn co-sum-btn--inc" onClick={() => change(item.productId, 1)} aria-label="Sumar">+</button>
-                <button className="co-sum-remove" onClick={() => remove(item.productId)} aria-label="Eliminar">✕</button>
+                <button className="co-sum-btn co-sum-btn--inc" onClick={() => change(item.productId, 1)} aria-label={t.checkout.shipping.increaseAria}>+</button>
+                <button className="co-sum-remove" onClick={() => remove(item.productId)} aria-label={t.checkout.shipping.removeAria}>✕</button>
               </div>
             </div>
             <div className="co-summary-item-price"><PriceTag eur={item.price * item.qty} /></div>
@@ -202,7 +205,7 @@ function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Disp
         ))}
       </div>
       <div className="co-summary-total">
-        <span>Total</span>
+        <span>{t.checkout.shipping.total}</span>
         <span><PriceTag eur={total} /></span>
       </div>
     </div>
@@ -211,7 +214,13 @@ function OrderSummary({ cart, setCart }: { cart: CartItem[]; setCart: React.Disp
 
 // ─── Step 1 ───────────────────────────────────────────────────────────────────
 function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; onNext: () => void }) {
+  const { t } = useLocale();
   const selectedId = cart[0]?.productId ?? null;
+  const tagText: Record<string, string> = {
+    trial: t.checkout.step1.tagTrial,
+    popular: t.checkout.step1.tagPopular,
+    max: t.checkout.step1.tagMax,
+  };
 
   const select = useCallback((option: SachetOption) => {
     setCart([{
@@ -230,10 +239,10 @@ function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: Re
         <div className="co-s1-header">
           <div className="co-s1-title-row">
             <Bolt size={32} />
-            <h1 className="co-title">ELIGE TU DOSIS</h1>
+            <h1 className="co-title">{t.checkout.step1.title}</h1>
             <Bolt size={32} />
           </div>
-          <p className="co-s1-sub">MCB Personal · Monodosis de café de especialidad</p>
+          <p className="co-s1-sub">{t.checkout.step1.sub}</p>
         </div>
 
         <div className="co-sachet-grid">
@@ -243,16 +252,16 @@ function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: Re
               className={`co-sachet-btn${selectedId === option.id ? " co-sachet-btn--on" : ""}`}
               onClick={() => select(option)}
             >
-              {option.tag && <span className="co-sachet-tag">{option.tag}</span>}
+              {option.tagKey && <span className="co-sachet-tag">{tagText[option.tagKey]}</span>}
               <span className="co-sachet-num">{option.qty}</span>
-              <span className="co-sachet-label">sachets</span>
+              <span className="co-sachet-label">{t.checkout.step1.sachets}</span>
               <span className="co-sachet-price"><PriceTag eur={option.price} /></span>
             </button>
           ))}
         </div>
 
         <button className="co-cta-btn co-single-cta" onClick={onNext} disabled={selectedId === null}>
-          Continuar <Bolt size={16} color="#0a0a0a" />
+          {t.checkout.step1.continue} <Bolt size={16} color="#0a0a0a" />
         </button>
       </div>
 
@@ -361,28 +370,28 @@ function StepOrigin({ totalSachets, counts, setCounts, onBack, onNext }: {
 }
 
 // ─── Step 3 ───────────────────────────────────────────────────────────────────
-function validate(s: ShippingData): Errors {
+function validate(s: ShippingData, errors: Dictionary["checkout"]["errors"]): Errors {
   const e: Errors = {};
-  if (!s.name.trim())       e.name       = "El nombre es requerido";
-  if (!s.phoneIso)          e.phone      = "Selecciona el país de tu teléfono";
-  else if (!s.phone.trim()) e.phone      = "El teléfono es requerido";
-  if (!s.email.trim())      e.email      = "El email es requerido";
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email)) e.email = "Email inválido";
-  if (!s.country.trim())    e.country    = "El país es requerido";
-  if (!s.department.trim()) e.department = "Este campo es requerido";
-  if (!s.city.trim())       e.city       = "La ciudad es requerida";
-  if (!s.address.trim())    e.address    = "La dirección es requerida";
+  if (!s.name.trim())       e.name       = errors.name;
+  if (!s.phoneIso)          e.phone      = errors.phoneCountry;
+  else if (!s.phone.trim()) e.phone      = errors.phoneRequired;
+  if (!s.email.trim())      e.email      = errors.email;
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email)) e.email = errors.emailInvalid;
+  if (!s.country.trim())    e.country    = errors.country;
+  if (!s.department.trim()) e.department = errors.department;
+  if (!s.city.trim())       e.city       = errors.city;
+  if (!s.address.trim())    e.address    = errors.address;
   return e;
 }
 
-function Field({ label, name, value, onChange, error, type = "text", placeholder, optional, prefix }: {
+function Field({ label, name, value, onChange, error, type = "text", placeholder, optionalLabel, prefix }: {
   label: string; name: keyof ShippingData; value: string; onChange: (v: string) => void;
-  error?: string; type?: string; placeholder?: string; optional?: boolean; prefix?: string;
+  error?: string; type?: string; placeholder?: string; optionalLabel?: string; prefix?: string;
 }) {
   return (
     <div className="co-field">
       <label className="co-label">
-        {label}{optional && <span className="co-optional"> (opcional)</span>}
+        {label}{optionalLabel && <span className="co-optional"> {optionalLabel}</span>}
       </label>
       <div className={`co-input-wrap${error ? " co-input-wrap--err" : ""}`}>
         {prefix && <span className="co-prefix">{prefix}</span>}
@@ -403,6 +412,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
   const [payResult, setPayResult] = useState<{ ok: boolean; message: string; reference?: string } | null>(null);
   const [wompiConfig, setWompiConfig] = useState<{ publicKey: string; sandbox: boolean } | null>(null);
   const eurToCopRate = useContext(EurToCopContext);
+  const { t, locale } = useLocale();
 
   useEffect(() => {
     fetch("/api/wompi/config")
@@ -418,12 +428,12 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const errs = validate(shipping);
+    const errs = validate(shipping, t.checkout.errors);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     if (!widgetReady || !window.WidgetCheckout || !wompiConfig) {
-      setPayResult({ ok: false, message: "El widget de pago todavía está cargando, intenta de nuevo en un segundo." });
+      setPayResult({ ok: false, message: t.checkout.payment.widgetLoading });
       return;
     }
 
@@ -439,7 +449,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reference, amountInCents, currency: "COP" }),
       });
-      if (!sigRes.ok) throw new Error("No se pudo preparar el pago");
+      if (!sigRes.ok) throw new Error(t.checkout.payment.signatureError);
       const { signature } = await sigRes.json();
 
       // Recorded as PENDING now, before the widget even opens, so the order isn't lost
@@ -454,9 +464,10 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
           amountInCents,
           origins,
           shipping,
+          locale,
         }),
       });
-      if (!orderRes.ok) throw new Error("No se pudo registrar el pedido");
+      if (!orderRes.ok) throw new Error(t.checkout.payment.orderError);
 
       const checkout = new window.WidgetCheckout({
         currency: "COP",
@@ -491,14 +502,14 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
         if (confirmedStatus === "APPROVED") {
           const order = { cart, origins, shipping, wompiTransactionId: id };
           console.log("ORDER →", JSON.stringify(order, null, 2));
-          setPayResult({ ok: true, message: "¡Pago aprobado!", reference });
+          setPayResult({ ok: true, message: t.checkout.payment.approved, reference });
         } else {
-          setPayResult({ ok: false, message: `El pago no se completó (estado: ${confirmedStatus ?? "desconocido"}). Puedes intentar de nuevo.` });
+          setPayResult({ ok: false, message: t.checkout.payment.notCompleted(confirmedStatus ?? t.checkout.payment.unknownStatus) });
         }
       });
     } catch (err) {
       setPaying(false);
-      setPayResult({ ok: false, message: err instanceof Error ? err.message : "Ocurrió un error al iniciar el pago." });
+      setPayResult({ ok: false, message: err instanceof Error ? err.message : t.checkout.payment.genericError });
     }
   };
 
@@ -510,14 +521,14 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
     return (
       <div className="co-step2 co-confirmation">
         <Bolt size={40} />
-        <h1 className="co-title">¡PEDIDO CONFIRMADO!</h1>
-        <p className="co-confirmation-sub">Te escribiremos a {shipping.email} con los detalles del envío.</p>
-        {payResult.reference && <p className="co-confirmation-ref">Referencia: {payResult.reference}</p>}
+        <h1 className="co-title">{t.checkout.confirmation.title}</h1>
+        <p className="co-confirmation-sub">{t.checkout.confirmation.sub(shipping.email)}</p>
+        {payResult.reference && <p className="co-confirmation-ref">{t.checkout.confirmation.reference} {payResult.reference}</p>}
         <p className="co-confirmation-contact">
-          ¿Dudas? Escríbenos a <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
+          {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
         </p>
         <button className="co-cta-btn" onClick={onComplete}>
-          Volver a la tienda <Bolt size={16} color="#0a0a0a" />
+          {t.checkout.confirmation.backToStore} <Bolt size={16} color="#0a0a0a" />
         </button>
       </div>
     );
@@ -527,10 +538,10 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
     <div className="co-step2">
       <Script src="https://checkout.wompi.co/widget.js" strategy="afterInteractive" onLoad={() => setWidgetReady(true)} />
       <div className="co-s2-header">
-        <button className="co-back-btn" onClick={onBack}>← Volver</button>
+        <button className="co-back-btn" onClick={onBack}>{t.checkout.home}</button>
         <div className="co-s2-title-row">
           <SkullIcon size={28} />
-          <h1 className="co-title">¿A DÓNDE TE LO MANDAMOS?</h1>
+          <h1 className="co-title">{t.checkout.shipping.title}</h1>
         </div>
 
         {/* Mobile summary accordion */}
@@ -538,7 +549,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
           <button className="co-summary-toggle" onClick={() => setSummaryOpen(!summaryOpen)}>
             <span className="co-summary-toggle-left">
               <SkullIcon size={16} />
-              Tu pedido — {totalItems} {totalItems === 1 ? "producto" : "productos"}
+              {t.checkout.shipping.yourOrder} — {totalItems} {totalItems === 1 ? t.checkout.shipping.item : t.checkout.shipping.items}
             </span>
             <span className="co-summary-toggle-right">
               <PriceTag eur={totalPrice} /> <span className="co-chevron">{summaryOpen ? "▲" : "▼"}</span>
@@ -556,58 +567,58 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
         <form className="co-form" onSubmit={handleSubmit} noValidate>
           {/* Contact */}
           <div className="co-form-section">
-            <div className="co-section-label"><Bolt size={15} /> Datos de contacto</div>
+            <div className="co-section-label"><Bolt size={15} /> {t.checkout.shipping.contactSection}</div>
             <div className="co-fields-grid">
-              <Field label="Nombre completo" name="name" value={shipping.name} onChange={set("name")} error={errors.name} placeholder="Tu nombre completo" />
+              <Field label={t.checkout.shipping.fullName} name="name" value={shipping.name} onChange={set("name")} error={errors.name} placeholder={t.checkout.shipping.fullNamePh} />
               <div className="co-field">
-                <label className="co-label">Teléfono</label>
+                <label className="co-label">{t.checkout.shipping.phone}</label>
                 <div className={`co-input-wrap${errors.phone ? " co-input-wrap--err" : ""}`}>
                   <select
                     className="co-phone-select"
                     value={shipping.phoneIso}
                     onChange={(e) => set("phoneIso")(e.target.value)}
-                    aria-label="Código de país"
+                    aria-label={t.checkout.shipping.phoneCountryAria}
                   >
-                    <option value="" disabled>País</option>
+                    <option value="" disabled>{t.checkout.shipping.phoneCountryOption}</option>
                     {PHONE_COUNTRIES.map((c) => (
-                      <option key={c.iso} value={c.iso}>{c.code} {c.name}</option>
+                      <option key={c.iso} value={c.iso}>{c.code} {locale === "en" ? c.nameEn : c.name}</option>
                     ))}
                   </select>
                   <input
                     type="tel"
                     value={shipping.phone}
                     onChange={(e) => set("phone")(e.target.value)}
-                    placeholder="Número de teléfono"
+                    placeholder={t.checkout.shipping.phonePh}
                     className="co-input"
                   />
                 </div>
                 {errors.phone && <span className="co-err-msg">{errors.phone}</span>}
               </div>
-              <Field label="Email" name="email" value={shipping.email} onChange={set("email")} error={errors.email} placeholder="tu@email.com" type="email" />
+              <Field label={t.checkout.shipping.email} name="email" value={shipping.email} onChange={set("email")} error={errors.email} placeholder={t.checkout.shipping.emailPh} type="email" />
             </div>
           </div>
 
           {/* Address */}
           <div className="co-form-section">
-            <div className="co-section-label"><Bolt size={15} /> Dirección de envío</div>
+            <div className="co-section-label"><Bolt size={15} /> {t.checkout.shipping.addressSection}</div>
             <div className="co-fields-grid">
-              <Field label="País" name="country" value={shipping.country} onChange={set("country")} error={errors.country} placeholder="Tu país" />
-              <Field label="Estado / Provincia / Departamento" name="department" value={shipping.department} onChange={set("department")} error={errors.department} placeholder="Según tu país" />
-              <Field label="Ciudad" name="city" value={shipping.city} onChange={set("city")} error={errors.city} placeholder="Tu ciudad" />
-              <Field label="Dirección" name="address" value={shipping.address} onChange={set("address")} error={errors.address} placeholder="Calle 123 #45-67" />
-              <Field label="Apartamento / Complemento" name="apt" value={shipping.apt} onChange={set("apt")} placeholder="Apto 301, Torre B…" optional />
-              <Field label="Código postal" name="postalCode" value={shipping.postalCode} onChange={set("postalCode")} placeholder="110111" optional />
+              <Field label={t.checkout.shipping.country} name="country" value={shipping.country} onChange={set("country")} error={errors.country} placeholder={t.checkout.shipping.countryPh} />
+              <Field label={t.checkout.shipping.department} name="department" value={shipping.department} onChange={set("department")} error={errors.department} placeholder={t.checkout.shipping.departmentPh} />
+              <Field label={t.checkout.shipping.city} name="city" value={shipping.city} onChange={set("city")} error={errors.city} placeholder={t.checkout.shipping.cityPh} />
+              <Field label={t.checkout.shipping.address} name="address" value={shipping.address} onChange={set("address")} error={errors.address} placeholder={t.checkout.shipping.addressPh} />
+              <Field label={t.checkout.shipping.apt} name="apt" value={shipping.apt} onChange={set("apt")} placeholder={t.checkout.shipping.aptPh} optionalLabel={t.checkout.shipping.optional} />
+              <Field label={t.checkout.shipping.postalCode} name="postalCode" value={shipping.postalCode} onChange={set("postalCode")} placeholder={t.checkout.shipping.postalCodePh} optionalLabel={t.checkout.shipping.optional} />
             </div>
           </div>
 
           {/* Notes */}
           <div className="co-form-section">
-            <div className="co-section-label"><Bolt size={15} /> Notas del pedido <span className="co-optional">(opcional)</span></div>
+            <div className="co-section-label"><Bolt size={15} /> {t.checkout.shipping.notesSection} <span className="co-optional">{t.checkout.shipping.optional}</span></div>
             <textarea
               className="co-textarea"
               value={shipping.notes}
               onChange={(e) => set("notes")(e.target.value)}
-              placeholder="Instrucciones de entrega, referencias del lugar…"
+              placeholder={t.checkout.shipping.notesPh}
               rows={3}
             />
           </div>
@@ -615,7 +626,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
           {/* Payment */}
           <div className="co-payment-ph">
             <LockIcon />
-            <span>Pago seguro con Wompi{wompiConfig?.sandbox ? " — modo de prueba" : ""}</span>
+            <span>{t.checkout.shipping.paymentSecure}{wompiConfig?.sandbox ? t.checkout.shipping.paymentSandbox : ""}</span>
           </div>
 
           {/* payResult.ok short-circuits into the confirmation screen above, so only the error case reaches here. */}
@@ -624,14 +635,14 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
           )}
 
           <button type="submit" className="co-submit-btn" disabled={paying}>
-            {paying ? "Procesando pago…" : <>Pagar <PriceTag eur={totalPrice} /></>} <Bolt size={18} color="#0a0a0a" />
+            {paying ? t.checkout.shipping.processingPayment : <>{t.checkout.shipping.pay} <PriceTag eur={totalPrice} /></>} <Bolt size={18} color="#0a0a0a" />
           </button>
         </form>
 
         {/* Desktop sidebar */}
         <aside className="co-sidebar">
           <div className="co-sidebar-title">
-            <SkullIcon size={20} /> Tu pedido
+            <SkullIcon size={20} /> {t.checkout.shipping.yourOrder}
           </div>
           <OrderSummary cart={cart} setCart={setCart} />
         </aside>
@@ -647,6 +658,7 @@ export function CheckoutFlow() {
   const [origins, setOrigins] = useState<OriginCounts>(ORIGIN_COUNTS_EMPTY);
   const [shipping, setShipping] = useState<ShippingData>(SHIPPING_EMPTY);
   const eurToCopRate = useEurToCopRate();
+  const { t } = useLocale();
 
   const totalSachets = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
 
@@ -679,7 +691,7 @@ export function CheckoutFlow() {
     <EurToCopContext.Provider value={eurToCopRate}>
       <div className="co-root">
         <div className="co-topbar">
-          <Link href="/" className="co-home-btn">← Volver</Link>
+          <Link href="/" className="co-home-btn">{t.checkout.home}</Link>
           <ProgressBar step={step} />
           <div className="co-topbar-spacer" />
         </div>

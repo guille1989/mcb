@@ -1,0 +1,44 @@
+.lang-switcher {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 10, 10, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 6px 10px;
+  backdrop-filter: blur(6px);
+  font-family: var(--font-space), 'Space Mono', monospace;
+}
+
+.lang-switcher-btn {
+  background: transparent;
+  border: none;
+  color: var(--white);
+  opacity: 0.5;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.lang-switcher-btn--on {
+  opacity: 1;
+  color: var(--yellow);
+}
+
+.lang-switcher-sep {
+  opacity: 0.3;
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .lang-switcher {
+    top: 12px;
+    right: 12px;
+  }
+}

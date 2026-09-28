@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, Space_Mono } from "next/font/google";
 import "./globals.css";
+import { LocaleProvider } from "@/lib/i18n/LocaleContext";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const bebasNeue = Bebas_Neue({
   weight: "400",
@@ -40,7 +42,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={`${bebasNeue.variable} ${spaceMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <LocaleProvider>
+          <LanguageSwitcher />
+          {children}
+        </LocaleProvider>
+      </body>
     </html>
   );
 }
