@@ -439,6 +439,7 @@
 .co-step-origin .co-single-cta { align-self: center; margin: 8px 0 0; }
 
 .co-cta-btn {
+  text-decoration: none;
   background: var(--yellow);
   color: var(--black);
   font-family: var(--font-space), 'Space Mono', monospace;

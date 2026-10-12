@@ -3,7 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
-import { useState, useCallback, useEffect, useContext, createContext, Fragment } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useCallback, useEffect, useContext, useMemo, useSyncExternalStore, createContext, Fragment } from "react";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 
@@ -69,6 +70,12 @@ type ShippingData = { name: string; phone: string; phoneIso: string; email: stri
 type Errors = Partial<Record<keyof ShippingData, string>>;
 
 const SHIPPING_EMPTY: ShippingData = { name: "", phone: "", phoneIso: "", email: "", country: "", department: "", city: "", address: "", apt: "", postalCode: "", notes: "" };
+
+// An approved payment redirects to its own URL (/checkout/gracias) so Google Ads can count
+// the conversion by URL. The order details ride along in sessionStorage, never in the URL.
+const CONFIRMATION_PATH = "/checkout/gracias";
+const CONFIRMED_ORDER_KEY = "mcb_confirmed_order";
+type ConfirmedOrder = { reference: string; email: string };
 
 // Approximate EUR → COP rate, kept as a constant to update by hand rather than a live API call.
 const FALLBACK_EUR_TO_COP = 3600;
@@ -402,17 +409,18 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
-function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, onComplete }: {
-  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void; onComplete: () => void;
+function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }: {
+  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [widgetReady, setWidgetReady] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [payResult, setPayResult] = useState<{ ok: boolean; message: string; reference?: string } | null>(null);
+  const [payError, setPayError] = useState<string | null>(null);
   const [wompiConfig, setWompiConfig] = useState<{ publicKey: string; sandbox: boolean } | null>(null);
   const eurToCopRate = useContext(EurToCopContext);
   const { t, locale } = useLocale();
+  const router = useRouter();
 
   useEffect(() => {
     fetch("/api/wompi/config")
@@ -433,12 +441,12 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
     if (Object.keys(errs).length > 0) return;
 
     if (!widgetReady || !window.WidgetCheckout || !wompiConfig) {
-      setPayResult({ ok: false, message: t.checkout.payment.widgetLoading });
+      setPayError(t.checkout.payment.widgetLoading);
       return;
     }
 
     setPaying(true);
-    setPayResult(null);
+    setPayError(null);
     try {
       const phoneCountry = PHONE_COUNTRIES.find((c) => c.iso === shipping.phoneIso);
       const amountInCents = Math.round(totalPrice * eurToCopRate * 100);
@@ -498,41 +506,31 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
           }
         }
 
-        setPaying(false);
         if (confirmedStatus === "APPROVED") {
           const order = { cart, origins, shipping, wompiTransactionId: id };
           console.log("ORDER →", JSON.stringify(order, null, 2));
-          setPayResult({ ok: true, message: t.checkout.payment.approved, reference });
+          const confirmed: ConfirmedOrder = { reference, email: shipping.email };
+          try {
+            window.sessionStorage.setItem(CONFIRMED_ORDER_KEY, JSON.stringify(confirmed));
+          } catch {
+            // sessionStorage unavailable — the confirmation page falls back to a generic message.
+          }
+          // `paying` stays on so the button can't be re-pressed while the route changes.
+          router.replace(CONFIRMATION_PATH);
         } else {
-          setPayResult({ ok: false, message: t.checkout.payment.notCompleted(confirmedStatus ?? t.checkout.payment.unknownStatus) });
+          setPaying(false);
+          setPayError(t.checkout.payment.notCompleted(confirmedStatus ?? t.checkout.payment.unknownStatus));
         }
       });
     } catch (err) {
       setPaying(false);
-      setPayResult({ ok: false, message: err instanceof Error ? err.message : t.checkout.payment.genericError });
+      setPayError(err instanceof Error ? err.message : t.checkout.payment.genericError);
     }
   };
 
   const totalItems = cart.reduce((s, c) => s + c.qty, 0);
   const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const doseQty = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
-
-  if (payResult?.ok) {
-    return (
-      <div className="co-step2 co-confirmation">
-        <Bolt size={40} />
-        <h1 className="co-title">{t.checkout.confirmation.title}</h1>
-        <p className="co-confirmation-sub">{t.checkout.confirmation.sub(shipping.email)}</p>
-        {payResult.reference && <p className="co-confirmation-ref">{t.checkout.confirmation.reference} {payResult.reference}</p>}
-        <p className="co-confirmation-contact">
-          {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
-        </p>
-        <button className="co-cta-btn" onClick={onComplete}>
-          {t.checkout.confirmation.backToStore} <Bolt size={16} color="#0a0a0a" />
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="co-step2">
@@ -629,9 +627,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack, o
             <span>{t.checkout.shipping.paymentSecure}{wompiConfig?.sandbox ? t.checkout.shipping.paymentSandbox : ""}</span>
           </div>
 
-          {/* payResult.ok short-circuits into the confirmation screen above, so only the error case reaches here. */}
-          {payResult && !payResult.ok && (
-            <div className="co-pay-result co-pay-result--err">{payResult.message}</div>
+          {/* An approved payment navigates to CONFIRMATION_PATH, so only errors are shown here. */}
+          {payError && (
+            <div className="co-pay-result co-pay-result--err">{payError}</div>
           )}
 
           <button type="submit" className="co-submit-btn" disabled={paying}>
@@ -680,13 +678,6 @@ export function CheckoutFlow() {
     setStep(3);
   };
 
-  const resetOrder = () => {
-    setCart([]);
-    setOrigins(ORIGIN_COUNTS_EMPTY);
-    setShipping(SHIPPING_EMPTY);
-    setStep(1);
-  };
-
   return (
     <EurToCopContext.Provider value={eurToCopRate}>
       <div className="co-root">
@@ -715,7 +706,7 @@ export function CheckoutFlow() {
             />
           )}
           {step === 3 && (
-            <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} onComplete={resetOrder} />
+            <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />
           )}
         </div>
       </div>
@@ -724,3 +715,51 @@ export function CheckoutFlow() {
 }
 
 
+// ─── Confirmation (/checkout/gracias) ─────────────────────────────────────────
+const subscribeNoop = () => () => {};
+
+function readConfirmedOrder(): string | null {
+  try {
+    return window.sessionStorage.getItem(CONFIRMED_ORDER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function CheckoutConfirmation() {
+  const { t } = useLocale();
+  // null on the server and whenever nothing is stored (e.g. storage blocked) — the
+  // email/reference lines are then just left out of the confirmation.
+  const stored = useSyncExternalStore(subscribeNoop, readConfirmedOrder, () => null);
+  const order = useMemo(() => {
+    try {
+      return stored ? (JSON.parse(stored) as ConfirmedOrder) : null;
+    } catch {
+      return null;
+    }
+  }, [stored]);
+
+  return (
+    <div className="co-root">
+      <div className="co-topbar">
+        <Link href="/" className="co-home-btn">{t.checkout.home}</Link>
+        <ProgressBar step={3} />
+        <div className="co-topbar-spacer" />
+      </div>
+      <div className="co-content">
+        <div className="co-step2 co-confirmation">
+          <Bolt size={40} />
+          <h1 className="co-title">{t.checkout.confirmation.title}</h1>
+          {order?.email && <p className="co-confirmation-sub">{t.checkout.confirmation.sub(order.email)}</p>}
+          {order?.reference && <p className="co-confirmation-ref">{t.checkout.confirmation.reference} {order.reference}</p>}
+          <p className="co-confirmation-contact">
+            {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
+          </p>
+          <Link href="/checkout" className="co-cta-btn">
+            {t.checkout.confirmation.backToStore} <Bolt size={16} color="#0a0a0a" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
