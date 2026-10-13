@@ -749,6 +749,96 @@
 .co-submit-btn:hover { transform: translateY(-2px); }
 .co-submit-btn:focus-visible { outline: 2px solid var(--white); outline-offset: 4px; }
 
+/* Currency notice modal (portaled to <body>, so it sits above .co-root's z-index 500) */
+.co-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.co-modal {
+  width: 100%;
+  max-width: 460px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--black);
+  color: var(--white);
+  border: 1px solid rgba(245,196,0,0.35);
+  padding: 28px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: coFadeUp 0.25s ease both;
+}
+
+.co-modal-title-row { display: flex; align-items: center; gap: 10px; }
+
+.co-modal-title {
+  font-family: var(--font-bebas), 'Bebas Neue', sans-serif;
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 3px;
+  color: var(--yellow);
+  line-height: 1;
+}
+
+.co-modal-text { font-size: 12px; line-height: 1.7; color: rgba(255,255,255,0.75); }
+
+.co-modal-amounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+}
+
+.co-modal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+
+.co-modal-eur,
+.co-modal-cop {
+  font-family: var(--font-bebas), 'Bebas Neue', sans-serif;
+  font-size: 26px;
+  letter-spacing: 1px;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.co-modal-eur { color: var(--white); }
+.co-modal-cop { color: var(--yellow); }
+
+.co-modal-rate { font-size: 12px; letter-spacing: 0.5px; text-transform: none; color: var(--white); white-space: nowrap; }
+
+.co-modal-row--total {
+  padding-top: 10px;
+  margin-top: 2px;
+  border-top: 1px dashed rgba(255,255,255,0.15);
+}
+
+.co-modal-formula { font-size: 10px; letter-spacing: 0.5px; color: rgba(255,255,255,0.4); text-align: right; }
+
+.co-modal-note { font-size: 10px; line-height: 1.6; color: rgba(255,255,255,0.45); }
+
+.co-modal-actions { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+.co-modal-cancel { padding: 12px 0 4px; }
+
 /* Desktop sidebar */
 .co-sidebar {
   display: none;

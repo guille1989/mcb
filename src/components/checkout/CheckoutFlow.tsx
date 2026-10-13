@@ -5,6 +5,7 @@ import Link from "next/link";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
 import { useState, useCallback, useEffect, useContext, useMemo, useSyncExternalStore, createContext, Fragment } from "react";
+import { createPortal } from "react-dom";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 
@@ -77,7 +78,7 @@ const CONFIRMATION_PATH = "/checkout/gracias";
 const CONFIRMED_ORDER_KEY = "mcb_confirmed_order";
 type ConfirmedOrder = { reference: string; email: string };
 
-// Approximate EUR → COP rate, kept as a constant to update by hand rather than a live API call.
+// Used until /api/exchange-rate answers with the day's EUR → COP rate, or if it fails.
 const FALLBACK_EUR_TO_COP = 3600;
 const EurToCopContext = createContext(FALLBACK_EUR_TO_COP);
 
@@ -409,6 +410,65 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
+// Prices are in euros but Wompi only charges in COP, so before it opens we spell out that
+// the peso amount is just the euro price converted — not a different or extra charge.
+function CurrencyNoticeModal({ eur, cop, rate, onConfirm, onCancel }: {
+  eur: number; cop: number; rate: number; onConfirm: () => void; onCancel: () => void;
+}) {
+  const { t } = useLocale();
+  const n = t.checkout.currencyNotice;
+  const eurText = `€${eur.toFixed(2)}`;
+  // Two decimals so the shown multiplication actually adds up to the charged pesos.
+  const rateText = rate.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const copText = cop.toLocaleString("es-CO");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // Portaled to <body>: .co-step2's entry animation leaves a transform on it, which would
+  // pin this position:fixed overlay to the step instead of the viewport.
+  return createPortal(
+    <div className="co-modal-backdrop" onClick={onCancel}>
+      <div className="co-modal" role="dialog" aria-modal="true" aria-labelledby="co-currency-title" onClick={(e) => e.stopPropagation()}>
+        <div className="co-modal-title-row">
+          <Bolt size={22} />
+          <h2 id="co-currency-title" className="co-modal-title">{n.title}</h2>
+        </div>
+        <p className="co-modal-text">{n.explanation(eurText)}</p>
+        <div className="co-modal-amounts">
+          <div className="co-modal-row">
+            <span>{n.priceLabel}</span>
+            <span className="co-modal-eur">{eurText}</span>
+          </div>
+          <div className="co-modal-row">
+            <span>{n.rateLabel}</span>
+            <span className="co-modal-rate">1 € = ${rateText} COP</span>
+          </div>
+          <div className="co-modal-row co-modal-row--total">
+            <span>{n.chargeLabel}</span>
+            <span className="co-modal-cop">${copText} COP</span>
+          </div>
+          <div className="co-modal-formula">{eurText} × {rateText} = ${copText} COP</div>
+        </div>
+        <p className="co-modal-text">{n.sameAmount}</p>
+        <p className="co-modal-note">{n.bankNote}</p>
+        <div className="co-modal-actions">
+          <button type="button" className="co-submit-btn" onClick={onConfirm} autoFocus>
+            {n.confirm} <Bolt size={16} color="#0a0a0a" />
+          </button>
+          <button type="button" className="co-back-btn co-modal-cancel" onClick={onCancel}>{n.cancel}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }: {
   cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
 }) {
@@ -416,6 +476,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [widgetReady, setWidgetReady] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [wompiConfig, setWompiConfig] = useState<{ publicKey: string; sandbox: boolean } | null>(null);
   const eurToCopRate = useContext(EurToCopContext);
@@ -434,7 +495,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
   const set = (key: keyof ShippingData) => (val: string) =>
     setShipping((prev) => ({ ...prev, [key]: val }));
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Submitting only validates and shows the currency notice; the payment itself starts
+  // from the notice's confirm button (startPayment).
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate(shipping, t.checkout.errors);
     setErrors(errs);
@@ -445,11 +508,22 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
       return;
     }
 
-    setPaying(true);
     setPayError(null);
+    setNoticeOpen(true);
+  };
+
+  const startPayment = async () => {
+    setNoticeOpen(false);
+    if (!window.WidgetCheckout || !wompiConfig) {
+      setPayError(t.checkout.payment.widgetLoading);
+      return;
+    }
+
+    setPaying(true);
     try {
       const phoneCountry = PHONE_COUNTRIES.find((c) => c.iso === shipping.phoneIso);
-      const amountInCents = Math.round(totalPrice * eurToCopRate * 100);
+      // Charged in whole pesos so it matches, to the peso, the COP figure in the notice.
+      const amountInCents = totalCop * 100;
       const reference = `MCB-${Date.now()}`;
 
       const sigRes = await fetch("/api/wompi/signature", {
@@ -530,6 +604,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
 
   const totalItems = cart.reduce((s, c) => s + c.qty, 0);
   const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
+  const totalCop = Math.round(totalPrice * eurToCopRate);
   const doseQty = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
 
   return (
@@ -645,6 +720,16 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
           <OrderSummary cart={cart} setCart={setCart} />
         </aside>
       </div>
+
+      {noticeOpen && (
+        <CurrencyNoticeModal
+          eur={totalPrice}
+          cop={totalCop}
+          rate={eurToCopRate}
+          onConfirm={startPayment}
+          onCancel={() => setNoticeOpen(false)}
+        />
+      )}
     </div>
   );
 }
