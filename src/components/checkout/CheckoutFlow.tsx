@@ -20,9 +20,6 @@ declare global {
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 const SACHET_OPTIONS = [
   { id: 1, qty: 10, price: 25.0, tagKey: "trial" },
-  { id: 2, qty: 15, price: 37.5, tagKey: null },
-  { id: 3, qty: 20, price: 50.0, tagKey: "popular" },
-  { id: 4, qty: 30, price: 75.0, tagKey: "max" },
 ] as const;
 
 const ORIGINS = [
@@ -71,6 +68,22 @@ type ShippingData = { name: string; phone: string; phoneIso: string; email: stri
 type Errors = Partial<Record<keyof ShippingData, string>>;
 
 const SHIPPING_EMPTY: ShippingData = { name: "", phone: "", phoneIso: "", email: "", country: "", department: "", city: "", address: "", apt: "", postalCode: "", notes: "" };
+
+function toCartItem(option: SachetOption): CartItem {
+  return {
+    productId: option.id,
+    name: "MCB PERSONAL",
+    subtitle: `${option.qty} sachets`,
+    price: option.price,
+    qty: 1,
+    image: "/assets/img/products/mcb_personal_10.png",
+  };
+}
+
+// Total sachets in the cart: each pack's dose times how many packs of it were added.
+function cartSachets(cart: CartItem[]): number {
+  return cart.reduce((s, c) => s + (SACHET_OPTIONS.find((o) => o.id === c.productId)?.qty ?? 0) * c.qty, 0);
+}
 
 // An approved payment redirects to its own URL (/checkout/gracias) so Google Ads can count
 // the conversion by URL. The order details ride along in sessionStorage, never in the URL.
@@ -231,14 +244,7 @@ function StepProducts({ cart, setCart, onNext }: { cart: CartItem[]; setCart: Re
   };
 
   const select = useCallback((option: SachetOption) => {
-    setCart([{
-      productId: option.id,
-      name: "MCB PERSONAL",
-      subtitle: `${option.qty} sachets`,
-      price: option.price,
-      qty: 1,
-      image: "/assets/img/products/mcb_personal_10.png",
-    }]);
+    setCart([toCartItem(option)]);
   }, [setCart]);
 
   return (
@@ -605,7 +611,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
   const totalItems = cart.reduce((s, c) => s + c.qty, 0);
   const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const totalCop = Math.round(totalPrice * eurToCopRate);
-  const doseQty = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
+  const doseQty = cartSachets(cart);
 
   return (
     <div className="co-step2">
@@ -737,13 +743,14 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export function CheckoutFlow() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // Only one dose is offered for now, so it starts selected.
+  const [cart, setCart] = useState<CartItem[]>(() => [toCartItem(SACHET_OPTIONS[0])]);
   const [origins, setOrigins] = useState<OriginCounts>(ORIGIN_COUNTS_EMPTY);
   const [shipping, setShipping] = useState<ShippingData>(SHIPPING_EMPTY);
   const eurToCopRate = useEurToCopRate();
   const { t } = useLocale();
 
-  const totalSachets = SACHET_OPTIONS.find((o) => o.id === cart[0]?.productId)?.qty ?? 0;
+  const totalSachets = cartSachets(cart);
 
   useEffect(() => {
     if (step >= 2 && cart.length === 0) setStep(1);
@@ -757,11 +764,11 @@ export function CheckoutFlow() {
 
   // Only one coffee type (Huila) is offered for now, so the origin-picker step (still
   // fully implemented below, just unused) is skipped: the whole dose goes to Huila
-  // automatically and we jump straight to shipping.
-  const skipToShipping = () => {
-    setOrigins({ ...ORIGIN_COUNTS_EMPTY, huila: totalSachets });
-    setStep(3);
-  };
+  // automatically and we jump straight to shipping. The mix is derived from the cart
+  // rather than stored, so packs added or removed in the shipping step's order summary
+  // are counted too — switch StepShipping back to `origins` when the picker returns.
+  const skipToShipping = () => setStep(3);
+  const huilaOnlyOrigins: OriginCounts = { ...ORIGIN_COUNTS_EMPTY, huila: totalSachets };
 
   return (
     <EurToCopContext.Provider value={eurToCopRate}>
@@ -791,7 +798,7 @@ export function CheckoutFlow() {
             />
           )}
           {step === 3 && (
-            <StepShipping cart={cart} setCart={setCart} origins={origins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />
+            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />
           )}
         </div>
       </div>
