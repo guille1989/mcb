@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
-import { useState, useCallback, useEffect, useContext, useMemo, useSyncExternalStore, createContext, Fragment } from "react";
+import { useState, useCallback, useEffect, useContext, useMemo, useRef, useSyncExternalStore, createContext, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
@@ -529,8 +529,14 @@ function CurrencyNoticeModal({ eur, cop, rate, onConfirm, onCancel }: {
   );
 }
 
-function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }: {
-  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>; onBack: () => void;
+// `getPaymentReference` returns the reference of the order whose widget was opened but not
+// yet resolved. Closing the widget and pressing pay again reuses it, so the same purchase
+// stays one order instead of piling up a PENDING row per click; `resetPaymentReference`
+// makes the next attempt a new order. They live in the parent so the reference also
+// survives going back a step and returning.
+function StepShipping({ cart, setCart, origins, shipping, setShipping, getPaymentReference, resetPaymentReference, onBack }: {
+  cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>;
+  getPaymentReference: () => string; resetPaymentReference: () => void; onBack: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -584,7 +590,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
       const phoneCountry = PHONE_COUNTRIES.find((c) => c.iso === shipping.phoneIso);
       // Charged in whole pesos so it matches, to the peso, the COP figure in the notice.
       const amountInCents = totalCop * 100;
-      const reference = `MCB-${Date.now()}`;
+      const reference = getPaymentReference();
 
       const sigRes = await fetch("/api/wompi/signature", {
         method: "POST",
@@ -626,6 +632,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
       });
 
       checkout.open(async (result) => {
+        // A transaction now exists for this reference (approved or not), so the next
+        // attempt must be a new order with its own reference.
+        resetPaymentReference();
         const status = result?.transaction?.status;
         const id = result?.transaction?.id;
 
@@ -664,6 +673,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
       // is released now; an approved payment turns `paying` back on in the callback.
       setPaying(false);
     } catch (err) {
+      // Also drops a reference the server rejected (e.g. already processed), so the retry
+      // starts a clean order instead of failing the same way forever.
+      resetPaymentReference();
       setPaying(false);
       setPayError(err instanceof Error ? err.message : t.checkout.payment.genericError);
     }
@@ -811,6 +823,11 @@ export function CheckoutFlow() {
   // Saved drafts live in localStorage, which the server can't read, so they're restored
   // after mount; the content stays hidden until then to avoid flashing step 1.
   const [restored, setRestored] = useState(false);
+  const paymentReference = useRef<string | null>(null);
+  const getPaymentReference = () => (paymentReference.current ??= `MCB-${Date.now()}`);
+  const resetPaymentReference = () => {
+    paymentReference.current = null;
+  };
   const eurToCopRate = useEurToCopRate();
   const { t } = useLocale();
 
@@ -880,7 +897,7 @@ export function CheckoutFlow() {
             />
           )}
           {restored && step === 3 && (
-            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />
+            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} getPaymentReference={getPaymentReference} resetPaymentReference={resetPaymentReference} onBack={() => setStep(1)} />
           )}
         </div>
       </div>
