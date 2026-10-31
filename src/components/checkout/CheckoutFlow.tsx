@@ -650,13 +650,19 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
           } catch {
             // sessionStorage unavailable — the confirmation page falls back to a generic message.
           }
-          // `paying` stays on so the button can't be re-pressed while the route changes.
+          // `paying` goes back on so the button can't be re-pressed while the route changes.
+          setPaying(true);
           router.replace(CONFIRMATION_PATH);
         } else {
           setPaying(false);
           setPayError(t.checkout.payment.notCompleted(confirmedStatus ?? t.checkout.payment.unknownStatus));
         }
       });
+
+      // The widget only calls back once a transaction exists, so closing it with the X
+      // never reaches the callback. The widget covers the page while open, so the button
+      // is released now; an approved payment turns `paying` back on in the callback.
+      setPaying(false);
     } catch (err) {
       setPaying(false);
       setPayError(err instanceof Error ? err.message : t.checkout.payment.genericError);
