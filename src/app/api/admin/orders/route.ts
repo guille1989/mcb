@@ -4,7 +4,7 @@ import { ADMIN_COOKIE_NAME, isValidSessionToken } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 const ORDER_COLUMNS =
-  "reference,status,wompi_transaction_id,dose_qty,dose_price_eur,amount_in_cents_cop," +
+  "reference,status,wompi_transaction_id,stripe_payment_intent_id,dose_qty,dose_price_eur," +
   "origin_huila,origin_tolima,origin_cauca,customer_name,customer_email,customer_phone," +
   "customer_phone_country,shipping_country,shipping_department,shipping_city,shipping_address," +
   "shipping_apt,shipping_postal_code,notes,confirmation_email_sent,shipped,shipped_at,created_at,updated_at";

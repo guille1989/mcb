@@ -2,25 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import Script from "next/script";
-import { useRouter } from "next/navigation";
-import { useState, useCallback, useEffect, useContext, useMemo, useRef, useSyncExternalStore, createContext, Fragment } from "react";
-import { createPortal } from "react-dom";
+import { useState, useCallback, useEffect, Fragment } from "react";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
-
-declare global {
-  interface Window {
-    WidgetCheckout?: new (config: Record<string, unknown>) => {
-      open: (callback: (result: { transaction: { id: string; status: string } }) => void) => void;
-    };
-  }
-}
+import { SACHET_OPTIONS, MAX_PACKS_PER_ITEM } from "@/lib/catalog";
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
-const SACHET_OPTIONS = [
-  { id: 1, qty: 10, price: 25.0, tagKey: "trial" },
-] as const;
+// Prices and products live in @/lib/catalog, which the server also uses to work out what
+// to charge. What's below is only display data for the origin picker.
 
 const ORIGINS = [
   { id: "huila", name: "HUILA", color: "#FFD000", altitude: "1.800 m", process: "LAVADO", notes: "CARAMELO · CÍTRICO", sca: "86+ SCA", image: "/assets/img/products/sachetDoble.png" },
@@ -85,22 +74,18 @@ function cartSachets(cart: CartItem[]): number {
   return cart.reduce((s, c) => s + (SACHET_OPTIONS.find((o) => o.id === c.productId)?.qty ?? 0) * c.qty, 0);
 }
 
-// An approved payment redirects to its own URL (/checkout/gracias) so Google Ads can count
-// the conversion by URL. The order details ride along in sessionStorage, never in the URL.
-const CONFIRMATION_PATH = "/checkout/gracias";
-const CONFIRMED_ORDER_KEY = "mcb_confirmed_order";
-type ConfirmedOrder = { reference: string; email: string };
-
 // The cart and shipping form are saved as the customer fills them in, so leaving the page
-// (closing the tab, going back from the payment screen) doesn't wipe their order. It's
-// cleared once a payment is approved, and ignored after a week.
+// (closing the tab, coming back from Stripe without paying) doesn't wipe their order. It's
+// cleared once a payment is confirmed on /checkout/gracias, and ignored after a week.
+// `reference` is the PENDING order already created for this cart, so paying again after
+// coming back updates that order instead of opening a second one.
 const DRAFT_KEY = "mcb_checkout_draft";
 const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-type CheckoutDraft = { step: 1 | 3; cart: CartItem[]; shipping: ShippingData };
+type CheckoutDraft = { step: 1 | 3; cart: CartItem[]; shipping: ShippingData; reference: string | null };
 
 function saveDraft(draft: CheckoutDraft) {
   try {
-    const stored = { savedAt: Date.now(), step: draft.step, cart: draft.cart.map((c) => ({ productId: c.productId, qty: c.qty })), shipping: draft.shipping };
+    const stored = { savedAt: Date.now(), step: draft.step, cart: draft.cart.map((c) => ({ productId: c.productId, qty: c.qty })), shipping: draft.shipping, reference: draft.reference };
     window.localStorage.setItem(DRAFT_KEY, JSON.stringify(stored));
   } catch {
     // storage full or blocked — checkout still works, it just won't be remembered.
@@ -130,7 +115,7 @@ function loadDraft(): CheckoutDraft | null {
     const cart: CartItem[] = [];
     for (const item of Array.isArray(stored.cart) ? stored.cart : []) {
       const option = SACHET_OPTIONS.find((o) => o.id === item?.productId);
-      const qty = Number.isInteger(item?.qty) ? Math.min(Math.max(item.qty, 1), 99) : 1;
+      const qty = Number.isInteger(item?.qty) ? Math.min(Math.max(item.qty, 1), MAX_PACKS_PER_ITEM) : 1;
       if (option) cart.push({ ...toCartItem(option), qty });
     }
     if (cart.length === 0) return null;
@@ -139,43 +124,15 @@ function loadDraft(): CheckoutDraft | null {
     for (const key of Object.keys(SHIPPING_EMPTY) as (keyof ShippingData)[]) {
       if (typeof stored.shipping?.[key] === "string") shipping[key] = stored.shipping[key];
     }
-    return { step: stored.step === 3 ? 3 : 1, cart, shipping };
+    const reference = typeof stored.reference === "string" ? stored.reference : null;
+    return { step: stored.step === 3 ? 3 : 1, cart, shipping, reference };
   } catch {
     return null;
   }
 }
 
-// Used until /api/exchange-rate answers with the day's EUR → COP rate, or if it fails.
-const FALLBACK_EUR_TO_COP = 3600;
-const EurToCopContext = createContext(FALLBACK_EUR_TO_COP);
-
-function useEurToCopRate() {
-  const [rate, setRate] = useState(FALLBACK_EUR_TO_COP);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/exchange-rate")
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled && typeof data?.rate === "number") setRate(data.rate);
-      })
-      .catch(() => {}); // keep the fallback rate on any network error
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return rate;
-}
-
 function PriceTag({ eur }: { eur: number }) {
-  const rate = useContext(EurToCopContext);
-  const cop = Math.round(eur * rate).toLocaleString("es-CO");
-  return (
-    <>
-      €{eur.toFixed(2)} <span className="co-price-cop">(≈ ${cop} COP)</span>
-    </>
-  );
+  return <>€{eur.toFixed(2)}</>;
 }
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -470,212 +427,70 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
-// Prices are in euros but Wompi only charges in COP, so before it opens we spell out that
-// the peso amount is just the euro price converted — not a different or extra charge.
-function CurrencyNoticeModal({ eur, cop, rate, onConfirm, onCancel }: {
-  eur: number; cop: number; rate: number; onConfirm: () => void; onCancel: () => void;
-}) {
-  const { t } = useLocale();
-  const n = t.checkout.currencyNotice;
-  const eurText = `€${eur.toFixed(2)}`;
-  // Two decimals so the shown multiplication actually adds up to the charged pesos.
-  const rateText = rate.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const copText = cop.toLocaleString("es-CO");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
-  // Portaled to <body>: .co-step2's entry animation leaves a transform on it, which would
-  // pin this position:fixed overlay to the step instead of the viewport.
-  return createPortal(
-    <div className="co-modal-backdrop" onClick={onCancel}>
-      <div className="co-modal" role="dialog" aria-modal="true" aria-labelledby="co-currency-title" onClick={(e) => e.stopPropagation()}>
-        <div className="co-modal-title-row">
-          <Bolt size={22} />
-          <h2 id="co-currency-title" className="co-modal-title">{n.title}</h2>
-        </div>
-        <p className="co-modal-text">{n.explanation(eurText)}</p>
-        <div className="co-modal-amounts">
-          <div className="co-modal-row">
-            <span>{n.priceLabel}</span>
-            <span className="co-modal-eur">{eurText}</span>
-          </div>
-          <div className="co-modal-row">
-            <span>{n.rateLabel}</span>
-            <span className="co-modal-rate">1 € = ${rateText} COP</span>
-          </div>
-          <div className="co-modal-row co-modal-row--total">
-            <span>{n.chargeLabel}</span>
-            <span className="co-modal-cop">${copText} COP</span>
-          </div>
-          <div className="co-modal-formula">{eurText} × {rateText} = ${copText} COP</div>
-        </div>
-        <p className="co-modal-text">{n.sameAmount}</p>
-        <p className="co-modal-note">{n.bankNote}</p>
-        <div className="co-modal-actions">
-          <button type="button" className="co-submit-btn" onClick={onConfirm} autoFocus>
-            {n.confirm} <Bolt size={16} color="#0a0a0a" />
-          </button>
-          <button type="button" className="co-back-btn co-modal-cancel" onClick={onCancel}>{n.cancel}</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-// `getPaymentReference` returns the reference of the order whose widget was opened but not
-// yet resolved. Closing the widget and pressing pay again reuses it, so the same purchase
-// stays one order instead of piling up a PENDING row per click; `resetPaymentReference`
-// makes the next attempt a new order. They live in the parent so the reference also
-// survives going back a step and returning.
-function StepShipping({ cart, setCart, origins, shipping, setShipping, getPaymentReference, resetPaymentReference, onBack }: {
+// `paymentReference` is the reference of the PENDING order already created for this cart,
+// if any. Sending it back lets the server update that order instead of opening a second
+// one when the customer returns from Stripe without paying and presses pay again. It lives
+// in the parent so it also survives going back a step and returning.
+function StepShipping({ cart, setCart, origins, shipping, setShipping, paymentReference, onReferenceChange, onBack }: {
   cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>;
-  getPaymentReference: () => string; resetPaymentReference: () => void; onBack: () => void;
+  paymentReference: string | null; onReferenceChange: (reference: string) => void; onBack: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [widgetReady, setWidgetReady] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [noticeOpen, setNoticeOpen] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
-  const [wompiConfig, setWompiConfig] = useState<{ publicKey: string; sandbox: boolean } | null>(null);
-  const eurToCopRate = useContext(EurToCopContext);
   const { t, locale } = useLocale();
-  const router = useRouter();
 
+  // Going back from Stripe's page can restore this one frozen mid-payment from the browser's
+  // back/forward cache, so the button is released again.
   useEffect(() => {
-    fetch("/api/wompi/config")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.publicKey) setWompiConfig({ publicKey: data.publicKey, sandbox: data.sandbox });
-      })
-      .catch(() => {});
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setPaying(false);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
   }, []);
 
   const set = (key: keyof ShippingData) => (val: string) =>
     setShipping((prev) => ({ ...prev, [key]: val }));
 
-  // Submitting only validates and shows the currency notice; the payment itself starts
-  // from the notice's confirm button (startPayment).
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate(shipping, t.checkout.errors);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    if (!widgetReady || !window.WidgetCheckout || !wompiConfig) {
-      setPayError(t.checkout.payment.widgetLoading);
-      return;
-    }
-
-    setPayError(null);
-    setNoticeOpen(true);
+    startPayment();
   };
 
+  // The server records the order as PENDING and creates the Stripe Checkout Session, so the
+  // order is on record even if the customer never comes back from Stripe. The amount is
+  // worked out there from the catalog; only the products and quantities are sent.
   const startPayment = async () => {
-    setNoticeOpen(false);
-    if (!window.WidgetCheckout || !wompiConfig) {
-      setPayError(t.checkout.payment.widgetLoading);
-      return;
-    }
-
     setPaying(true);
+    setPayError(null);
     try {
-      const phoneCountry = PHONE_COUNTRIES.find((c) => c.iso === shipping.phoneIso);
-      // Charged in whole pesos so it matches, to the peso, the COP figure in the notice.
-      const amountInCents = totalCop * 100;
-      const reference = getPaymentReference();
-
-      const sigRes = await fetch("/api/wompi/signature", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reference, amountInCents, currency: "COP" }),
-      });
-      if (!sigRes.ok) throw new Error(t.checkout.payment.signatureError);
-      const { signature } = await sigRes.json();
-
-      // Recorded as PENDING now, before the widget even opens, so the order isn't lost
-      // if the customer closes the tab mid-payment — the webhook updates its status later.
-      const orderRes = await fetch("/api/orders", {
+      const res = await fetch("/api/checkout/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reference,
-          doseQty,
-          dosePriceEur: totalPrice,
-          amountInCents,
+          reference: paymentReference,
+          cart: cart.map((c) => ({ productId: c.productId, qty: c.qty })),
           origins,
           shipping,
           locale,
         }),
       });
-      if (!orderRes.ok) throw new Error(t.checkout.payment.orderError);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.url) throw new Error(t.checkout.payment.orderError);
 
-      const checkout = new window.WidgetCheckout({
-        currency: "COP",
-        amountInCents,
-        reference,
-        publicKey: wompiConfig.publicKey,
-        signature: { integrity: signature },
-        customerData: {
-          email: shipping.email,
-          fullName: shipping.name,
-          phoneNumber: shipping.phone,
-          phoneNumberPrefix: phoneCountry?.code ?? "+57",
-        },
-      });
+      // Saved right here: the draft effect wouldn't get to run before the page unloads.
+      onReferenceChange(data.reference);
+      saveDraft({ step: 3, cart, shipping, reference: data.reference });
 
-      checkout.open(async (result) => {
-        // A transaction now exists for this reference (approved or not), so the next
-        // attempt must be a new order with its own reference.
-        resetPaymentReference();
-        const status = result?.transaction?.status;
-        const id = result?.transaction?.id;
-
-        // Don't trust the widget callback alone — re-check server-side against Wompi.
-        let confirmedStatus = status;
-        if (id) {
-          try {
-            const statusRes = await fetch(`/api/wompi/status?id=${id}`);
-            if (statusRes.ok) confirmedStatus = (await statusRes.json()).status;
-          } catch {
-            // fall back to the widget's own reported status
-          }
-        }
-
-        if (confirmedStatus === "APPROVED") {
-          const order = { cart, origins, shipping, wompiTransactionId: id };
-          console.log("ORDER →", JSON.stringify(order, null, 2));
-          const confirmed: ConfirmedOrder = { reference, email: shipping.email };
-          clearDraft();
-          try {
-            window.sessionStorage.setItem(CONFIRMED_ORDER_KEY, JSON.stringify(confirmed));
-          } catch {
-            // sessionStorage unavailable — the confirmation page falls back to a generic message.
-          }
-          // `paying` goes back on so the button can't be re-pressed while the route changes.
-          setPaying(true);
-          router.replace(CONFIRMATION_PATH);
-        } else {
-          setPaying(false);
-          setPayError(t.checkout.payment.notCompleted(confirmedStatus ?? t.checkout.payment.unknownStatus));
-        }
-      });
-
-      // The widget only calls back once a transaction exists, so closing it with the X
-      // never reaches the callback. The widget covers the page while open, so the button
-      // is released now; an approved payment turns `paying` back on in the callback.
-      setPaying(false);
+      // `paying` stays on — this page is about to be replaced by Stripe's.
+      window.location.assign(data.url);
     } catch (err) {
-      // Also drops a reference the server rejected (e.g. already processed), so the retry
-      // starts a clean order instead of failing the same way forever.
-      resetPaymentReference();
       setPaying(false);
       setPayError(err instanceof Error ? err.message : t.checkout.payment.genericError);
     }
@@ -683,12 +498,9 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, getPaymen
 
   const totalItems = cart.reduce((s, c) => s + c.qty, 0);
   const totalPrice = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const totalCop = Math.round(totalPrice * eurToCopRate);
-  const doseQty = cartSachets(cart);
 
   return (
     <div className="co-step2">
-      <Script src="https://checkout.wompi.co/widget.js" strategy="afterInteractive" onLoad={() => setWidgetReady(true)} />
       <div className="co-s2-header">
         <button className="co-back-btn" onClick={onBack}>{t.checkout.home}</button>
         <div className="co-s2-title-row">
@@ -778,10 +590,10 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, getPaymen
           {/* Payment */}
           <div className="co-payment-ph">
             <LockIcon />
-            <span>{t.checkout.shipping.paymentSecure}{wompiConfig?.sandbox ? t.checkout.shipping.paymentSandbox : ""}</span>
+            <span>{t.checkout.shipping.paymentSecure}</span>
           </div>
 
-          {/* An approved payment navigates to CONFIRMATION_PATH, so only errors are shown here. */}
+          {/* A successful start navigates to Stripe, so only errors are shown here. */}
           {payError && (
             <div className="co-pay-result co-pay-result--err">{payError}</div>
           )}
@@ -799,16 +611,6 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, getPaymen
           <OrderSummary cart={cart} setCart={setCart} />
         </aside>
       </div>
-
-      {noticeOpen && (
-        <CurrencyNoticeModal
-          eur={totalPrice}
-          cop={totalCop}
-          rate={eurToCopRate}
-          onConfirm={startPayment}
-          onCancel={() => setNoticeOpen(false)}
-        />
-      )}
     </div>
   );
 }
@@ -823,12 +625,7 @@ export function CheckoutFlow() {
   // Saved drafts live in localStorage, which the server can't read, so they're restored
   // after mount; the content stays hidden until then to avoid flashing step 1.
   const [restored, setRestored] = useState(false);
-  const paymentReference = useRef<string | null>(null);
-  const getPaymentReference = () => (paymentReference.current ??= `MCB-${Date.now()}`);
-  const resetPaymentReference = () => {
-    paymentReference.current = null;
-  };
-  const eurToCopRate = useEurToCopRate();
+  const [paymentReference, setPaymentReference] = useState<string | null>(null);
   const { t } = useLocale();
 
   const totalSachets = cartSachets(cart);
@@ -841,6 +638,7 @@ export function CheckoutFlow() {
       setCart(draft.cart);
       setShipping(draft.shipping);
       setStep(draft.step);
+      setPaymentReference(draft.reference);
     }
     setRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -848,8 +646,8 @@ export function CheckoutFlow() {
 
   useEffect(() => {
     if (!restored) return;
-    if (step === 1 || step === 3) saveDraft({ step, cart, shipping });
-  }, [restored, step, cart, shipping]);
+    if (step === 1 || step === 3) saveDraft({ step, cart, shipping, reference: paymentReference });
+  }, [restored, step, cart, shipping, paymentReference]);
 
   useEffect(() => {
     if (step >= 2 && cart.length === 0) setStep(1);
@@ -870,7 +668,7 @@ export function CheckoutFlow() {
   const huilaOnlyOrigins: OriginCounts = { ...ORIGIN_COUNTS_EMPTY, huila: totalSachets };
 
   return (
-    <EurToCopContext.Provider value={eurToCopRate}>
+    <>
       <div className="co-root">
         <div className="co-topbar">
           <Link href="/" className="co-home-btn">{t.checkout.home}</Link>
@@ -897,38 +695,30 @@ export function CheckoutFlow() {
             />
           )}
           {restored && step === 3 && (
-            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} getPaymentReference={getPaymentReference} resetPaymentReference={resetPaymentReference} onBack={() => setStep(1)} />
+            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} paymentReference={paymentReference} onReferenceChange={setPaymentReference} onBack={() => setStep(1)} />
           )}
         </div>
       </div>
-    </EurToCopContext.Provider>
+    </>
   );
 }
 
 
 // ─── Confirmation (/checkout/gracias) ─────────────────────────────────────────
-const subscribeNoop = () => () => {};
+// Stripe sends the customer here only after they finish its payment page, with the session
+// id in the URL. The page looks the session up server-side and passes what it found, so
+// nothing here trusts the browser; `order` is null when the lookup failed, in which case the
+// reference/email lines are just left out. `paid` is false for delayed payment methods,
+// whose money (and confirmation email) arrives later.
+export type ConfirmedOrder = { reference: string | null; email: string | null; paid: boolean };
 
-function readConfirmedOrder(): string | null {
-  try {
-    return window.sessionStorage.getItem(CONFIRMED_ORDER_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function CheckoutConfirmation() {
+export function CheckoutConfirmation({ order }: { order: ConfirmedOrder | null }) {
   const { t } = useLocale();
-  // null on the server and whenever nothing is stored (e.g. storage blocked) — the
-  // email/reference lines are then just left out of the confirmation.
-  const stored = useSyncExternalStore(subscribeNoop, readConfirmedOrder, () => null);
-  const order = useMemo(() => {
-    try {
-      return stored ? (JSON.parse(stored) as ConfirmedOrder) : null;
-    } catch {
-      return null;
-    }
-  }, [stored]);
+
+  // The order is placed, so the saved cart must not come back on the next visit to /checkout.
+  useEffect(() => {
+    clearDraft();
+  }, []);
 
   return (
     <div className="co-root">
@@ -941,7 +731,7 @@ export function CheckoutConfirmation() {
         <div className="co-step2 co-confirmation">
           <Bolt size={40} />
           <h1 className="co-title">{t.checkout.confirmation.title}</h1>
-          {order?.email && <p className="co-confirmation-sub">{t.checkout.confirmation.sub(order.email)}</p>}
+          {order?.email && <p className="co-confirmation-sub">{order.paid ? t.checkout.confirmation.sub(order.email) : t.checkout.confirmation.pendingSub(order.email)}</p>}
           {order?.reference && <p className="co-confirmation-ref">{t.checkout.confirmation.reference} {order.reference}</p>}
           <p className="co-confirmation-contact">
             {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>

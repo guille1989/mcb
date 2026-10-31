@@ -7,9 +7,9 @@ type Order = {
   reference: string;
   status: string;
   wompi_transaction_id: string | null;
+  stripe_payment_intent_id: string | null;
   dose_qty: number;
   dose_price_eur: number;
-  amount_in_cents_cop: number;
   origin_huila: number;
   origin_tolima: number;
   origin_cauca: number;
@@ -51,6 +51,9 @@ function statusLabel(status: string) {
       return { text: "APROBADO", cls: "admin-badge--ok" };
     case "PENDING":
       return { text: "PENDIENTE", cls: "admin-badge--pending" };
+    case "EXPIRED":
+      // The Stripe payment page timed out with nothing paid — an abandoned checkout.
+      return { text: "ABANDONADO", cls: "admin-badge--err" };
     case "DECLINED":
     case "ERROR":
     case "VOIDED":
@@ -314,7 +317,7 @@ export default function AdminPage() {
             )}
 
             <h3>Pago</h3>
-            <p className="admin-mono">{selected.wompi_transaction_id ?? "—"}</p>
+            <p className="admin-mono">{selected.stripe_payment_intent_id ?? selected.wompi_transaction_id ?? "—"}</p>
             <p className="admin-muted">
               Creado {relativeTime(selected.created_at)} · Actualizado{" "}
               {relativeTime(selected.updated_at)}
