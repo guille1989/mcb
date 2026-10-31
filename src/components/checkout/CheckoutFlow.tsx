@@ -91,6 +91,60 @@ const CONFIRMATION_PATH = "/checkout/gracias";
 const CONFIRMED_ORDER_KEY = "mcb_confirmed_order";
 type ConfirmedOrder = { reference: string; email: string };
 
+// The cart and shipping form are saved as the customer fills them in, so leaving the page
+// (closing the tab, going back from the payment screen) doesn't wipe their order. It's
+// cleared once a payment is approved, and ignored after a week.
+const DRAFT_KEY = "mcb_checkout_draft";
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+type CheckoutDraft = { step: 1 | 3; cart: CartItem[]; shipping: ShippingData };
+
+function saveDraft(draft: CheckoutDraft) {
+  try {
+    const stored = { savedAt: Date.now(), step: draft.step, cart: draft.cart.map((c) => ({ productId: c.productId, qty: c.qty })), shipping: draft.shipping };
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(stored));
+  } catch {
+    // storage full or blocked — checkout still works, it just won't be remembered.
+  }
+}
+
+function clearDraft() {
+  try {
+    window.localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // nothing to clear if storage is blocked.
+  }
+}
+
+// Rebuilt from the catalog rather than trusted as stored, so a stale or edited draft
+// can't bring back an unknown product or a different price.
+function loadDraft(): CheckoutDraft | null {
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw);
+    if (typeof stored?.savedAt !== "number" || Date.now() - stored.savedAt > DRAFT_MAX_AGE_MS) {
+      clearDraft();
+      return null;
+    }
+
+    const cart: CartItem[] = [];
+    for (const item of Array.isArray(stored.cart) ? stored.cart : []) {
+      const option = SACHET_OPTIONS.find((o) => o.id === item?.productId);
+      const qty = Number.isInteger(item?.qty) ? Math.min(Math.max(item.qty, 1), 99) : 1;
+      if (option) cart.push({ ...toCartItem(option), qty });
+    }
+    if (cart.length === 0) return null;
+
+    const shipping = { ...SHIPPING_EMPTY };
+    for (const key of Object.keys(SHIPPING_EMPTY) as (keyof ShippingData)[]) {
+      if (typeof stored.shipping?.[key] === "string") shipping[key] = stored.shipping[key];
+    }
+    return { step: stored.step === 3 ? 3 : 1, cart, shipping };
+  } catch {
+    return null;
+  }
+}
+
 // Used until /api/exchange-rate answers with the day's EUR → COP rate, or if it fails.
 const FALLBACK_EUR_TO_COP = 3600;
 const EurToCopContext = createContext(FALLBACK_EUR_TO_COP);
@@ -590,6 +644,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, onBack }:
           const order = { cart, origins, shipping, wompiTransactionId: id };
           console.log("ORDER →", JSON.stringify(order, null, 2));
           const confirmed: ConfirmedOrder = { reference, email: shipping.email };
+          clearDraft();
           try {
             window.sessionStorage.setItem(CONFIRMED_ORDER_KEY, JSON.stringify(confirmed));
           } catch {
@@ -747,10 +802,31 @@ export function CheckoutFlow() {
   const [cart, setCart] = useState<CartItem[]>(() => [toCartItem(SACHET_OPTIONS[0])]);
   const [origins, setOrigins] = useState<OriginCounts>(ORIGIN_COUNTS_EMPTY);
   const [shipping, setShipping] = useState<ShippingData>(SHIPPING_EMPTY);
+  // Saved drafts live in localStorage, which the server can't read, so they're restored
+  // after mount; the content stays hidden until then to avoid flashing step 1.
+  const [restored, setRestored] = useState(false);
   const eurToCopRate = useEurToCopRate();
   const { t } = useLocale();
 
   const totalSachets = cartSachets(cart);
+
+  useEffect(() => {
+    // localStorage only exists in the browser, so reading it during render would mismatch the server HTML.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    const draft = loadDraft();
+    if (draft) {
+      setCart(draft.cart);
+      setShipping(draft.shipping);
+      setStep(draft.step);
+    }
+    setRestored(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    if (step === 1 || step === 3) saveDraft({ step, cart, shipping });
+  }, [restored, step, cart, shipping]);
 
   useEffect(() => {
     if (step >= 2 && cart.length === 0) setStep(1);
@@ -779,7 +855,7 @@ export function CheckoutFlow() {
           <div className="co-topbar-spacer" />
         </div>
         <div key={step} className="co-content">
-          {step === 1 && (
+          {restored && step === 1 && (
             <StepProducts
               cart={cart}
               setCart={setCartAndResetOrigins}
@@ -797,7 +873,7 @@ export function CheckoutFlow() {
               onNext={() => setStep(3)}
             />
           )}
-          {step === 3 && (
+          {restored && step === 3 && (
             <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} onBack={() => setStep(1)} />
           )}
         </div>
