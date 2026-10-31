@@ -43,8 +43,9 @@ export async function POST(req: Request) {
       return setStatus(event.data.object, "DECLINED");
     case "checkout.session.expired":
       // The customer never paid. Only a still-PENDING order is marked, so a late event
-      // can't overwrite one that was paid through another session.
-      return setStatus(event.data.object, "EXPIRED", "PENDING");
+      // can't overwrite one that was paid through another session — and only when this is
+      // the order's current session, since a retry closes the previous one on purpose.
+      return setStatus(event.data.object, "EXPIRED", { status: "PENDING", currentSession: true });
     default:
       return NextResponse.json({ ok: true });
   }
@@ -54,7 +55,11 @@ function referenceOf(session: Stripe.Checkout.Session) {
   return session.client_reference_id ?? session.metadata?.reference ?? null;
 }
 
-async function setStatus(session: Stripe.Checkout.Session, status: string, onlyIfStatus?: string) {
+async function setStatus(
+  session: Stripe.Checkout.Session,
+  status: string,
+  only?: { status?: string; currentSession?: boolean },
+) {
   const reference = referenceOf(session);
   if (!reference) return NextResponse.json({ ok: true });
 
@@ -62,7 +67,8 @@ async function setStatus(session: Stripe.Checkout.Session, status: string, onlyI
     .from("orders")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("reference", reference);
-  if (onlyIfStatus) query = query.eq("status", onlyIfStatus);
+  if (only?.status) query = query.eq("status", only.status);
+  if (only?.currentSession) query = query.eq("stripe_session_id", session.id);
 
   const { error } = await query;
   if (error) {
@@ -110,7 +116,9 @@ async function approve(session: Stripe.Checkout.Session) {
       await sendOrderConfirmationEmail(claimed);
     } catch (emailError) {
       // Don't fail the whole webhook over an email hiccup — the order is already saved.
+      // The flag goes back to false so the admin shows that no email actually went out.
       console.error("Stripe webhook: failed to send confirmation email", emailError);
+      await supabase.from("orders").update({ confirmation_email_sent: false }).eq("reference", reference);
     }
   }
 

@@ -100,6 +100,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Could not prepare the order" }, { status: 500 });
   }
 
+  // Set when this order already has a session from an earlier attempt; closed further down,
+  // once the new session is stored on the order.
+  let previousSessionId: string | null = null;
+
   if (existing && existing.status === "PENDING") {
     const { error } = await supabase
       .from("orders")
@@ -110,12 +114,7 @@ export async function POST(req: Request) {
       console.error("Checkout: failed to update pending order", error);
       return NextResponse.json({ error: "Could not prepare the order" }, { status: 500 });
     }
-
-    // Only one session may be payable per order, or a customer with two tabs open
-    // could pay the same order twice.
-    if (existing.stripe_session_id) {
-      await stripe.checkout.sessions.expire(existing.stripe_session_id).catch(() => {});
-    }
+    previousSessionId = existing.stripe_session_id;
   } else {
     if (existing) reference = `MCB-${Date.now()}`;
     const { error } = await supabase.from("orders").insert({ reference, status: "PENDING", ...fields });
@@ -125,6 +124,13 @@ export async function POST(req: Request) {
     }
   }
 
+  // Shown on the payment in the Stripe dashboard, so where to ship it is visible there too
+  // (the address itself was collected on our form, not on Stripe's page).
+  const shipTo = [shipping.address, shipping.apt, shipping.city, shipping.department, shipping.country, shipping.postalCode]
+    .filter(Boolean)
+    .join(", ");
+  const metadata = { reference, ship_to: `${shipping.name} — ${shipTo}`.slice(0, 500) };
+
   const site = getSiteUrl(req);
   let session;
   try {
@@ -133,8 +139,8 @@ export async function POST(req: Request) {
       locale,
       customer_email: shipping.email,
       client_reference_id: reference,
-      metadata: { reference },
-      payment_intent_data: { metadata: { reference } },
+      metadata,
+      payment_intent_data: { metadata },
       expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
       line_items: priced.lines.map((l) => ({
         quantity: l.qty,
@@ -163,6 +169,13 @@ export async function POST(req: Request) {
     // The webhook finds the order by reference, so payment still works; only the
     // "close the previous session" step on a retry is lost.
     console.error("Checkout: failed to store session id", linkError);
+  } else if (previousSessionId) {
+    // Only one session may be payable per order, or a customer with two tabs open could pay
+    // the same order twice. It's closed only now that the order points at the new session:
+    // Stripe answers with a "session expired" event, and the webhook ignores it unless it
+    // belongs to the order's current session — closing it earlier would mark the order
+    // EXPIRED while its new session is still open.
+    await stripe.checkout.sessions.expire(previousSessionId).catch(() => {});
   }
 
   if (!session.url) {

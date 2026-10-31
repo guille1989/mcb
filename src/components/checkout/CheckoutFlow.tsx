@@ -734,7 +734,7 @@ export function CheckoutConfirmation({ order }: { order: ConfirmedOrder | null }
           {order?.email && <p className="co-confirmation-sub">{order.paid ? t.checkout.confirmation.sub(order.email) : t.checkout.confirmation.pendingSub(order.email)}</p>}
           {order?.reference && <p className="co-confirmation-ref">{t.checkout.confirmation.reference} {order.reference}</p>}
           <p className="co-confirmation-contact">
-            {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffebaby.com">orders@themothercoffebaby.com</a>
+            {t.checkout.confirmation.contact} <a href="mailto:orders@themothercoffeebaby.com">orders@themothercoffeebaby.com</a>
           </p>
           <Link href="/checkout" className="co-cta-btn">
             {t.checkout.confirmation.backToStore} <Bolt size={16} color="#0a0a0a" />

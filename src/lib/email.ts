@@ -8,7 +8,7 @@ function getResendClient() {
 }
 
 function getFromAddress() {
-  // Falls back to Resend's own test sender until the themothercoffebaby.com domain
+  // Falls back to Resend's own test sender until the themothercoffeebaby.com domain
   // is verified in Resend — swap RESEND_FROM_EMAIL once that's done.
   return process.env.RESEND_FROM_EMAIL || "The Mother Coffee Baby <onboarding@resend.dev>";
 }
@@ -74,7 +74,7 @@ export async function sendOrderConfirmationEmail(order: OrderForEmail) {
           ${order.shipping_country}${order.shipping_postal_code ? " " + order.shipping_postal_code : ""}
         </p>
         <p>${text.willNotify}</p>
-        <p style="opacity:0.6; font-size: 13px;">${text.questions} <a href="mailto:orders@themothercoffebaby.com" style="color:#FFD000;">orders@themothercoffebaby.com</a></p>
+        <p style="opacity:0.6; font-size: 13px;">${text.questions} <a href="mailto:orders@themothercoffeebaby.com" style="color:#FFD000;">orders@themothercoffeebaby.com</a></p>
       </div>
     `,
   });
