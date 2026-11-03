@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     case "checkout.session.async_payment_succeeded":
       return approve(event.data.object);
     case "checkout.session.async_payment_failed":
-      return setStatus(event.data.object, "DECLINED");
+      return setStatus(event.data.object, "DECLINED", { status: "PENDING", currentSession: true });
     case "checkout.session.expired":
       // The customer never paid. Only a still-PENDING order is marked, so a late event
       // can't overwrite one that was paid through another session — and only when this is

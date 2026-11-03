@@ -79,3 +79,32 @@ export async function sendOrderConfirmationEmail(order: OrderForEmail) {
     `,
   });
 }
+
+export function sendCheckoutReminderEmail(reminder: { to: string; locale: "es" | "en"; url: string }, reference: string) {
+  const text = reminder.locale === "en"
+    ? {
+        subject: "Would you like to finish your purchase?",
+        message: "Your checkout expired before payment. You can use the link below to pick up where you left off.",
+        action: "Resume my purchase",
+      }
+    : {
+        subject: "¿Quieres terminar tu compra?",
+        message: "Tu sesión de pago caducó. Puedes retomar tu compra con el enlace de abajo.",
+        action: "Retomar mi compra",
+      };
+
+  return getResendClient().emails.send({
+    from: getFromAddress(),
+    to: reminder.to,
+    ...(process.env.RESEND_REPLY_TO ? { replyTo: process.env.RESEND_REPLY_TO } : {}),
+    subject: text.subject,
+    text: `${text.message}\n\n${text.action}: ${reminder.url}`,
+    html: `
+      <div style="font-family: monospace; background:#0a0a0a; color:#fafafa; padding:32px;">
+        <h1 style="color:#FFD000;">${text.subject}</h1>
+        <p>${text.message}</p>
+        <p><a href="${reminder.url}" style="color:#FFD000;">${text.action}</a></p>
+      </div>
+    `,
+  }, { idempotencyKey: `checkout-reminder/${reference}` });
+}

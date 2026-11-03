@@ -1,10 +1,14 @@
+import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getStripe, getSiteUrl } from "@/lib/stripe";
 import { CURRENCY, priceCart } from "@/lib/catalog";
+import {
+  CHECKOUT_KEY, ORDER_REFERENCE, checkoutKeyHash, claimOrderAction, hasLaterLegacyCheckout,
+  readRecoveryToken, releaseOrderAction,
+} from "@/lib/checkoutRecovery";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const REFERENCE_RE = /^MCB-\d{10,}$/;
 // Stripe won't accept a Checkout Session that expires in under 30 minutes.
 const SESSION_TTL_SECONDS = 31 * 60;
 
@@ -12,14 +16,8 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-// Creates (or refreshes) the PENDING order and a Stripe Checkout Session for it, and
-// returns the URL to send the customer to. The amount is worked out here from the
-// catalog — the browser only says which products and how many.
-//
-// Idempotent per `reference`: if the customer comes back from Stripe without paying and
-// presses pay again, the client sends the same reference, the still-PENDING order is
-// updated in place and its previous session is closed, so one purchase stays one order.
-// A reference that already moved past PENDING (paid, declined, expired) gets a new one.
+// Keep one order across payment attempts so a reminder and its recovery link
+// always follow the current payment state.
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
 
@@ -59,6 +57,7 @@ export async function POST(req: Request) {
 
   const fields = {
     locale,
+    checkout_cart: priced.lines.map(({ productId, qty }) => ({ productId, qty })),
     dose_qty: priced.doseQty,
     dose_price_eur: priced.totalEur,
     amount_in_cents: priced.amountInCents,
@@ -79,62 +78,86 @@ export async function POST(req: Request) {
     notes: shipping.notes || null,
   };
 
-  let stripe;
+  const suppliedReference = typeof body.reference === "string" && ORDER_REFERENCE.test(body.reference) ? body.reference : null;
+  const keyHash = typeof body.checkoutKey === "string" && CHECKOUT_KEY.test(body.checkoutKey)
+    ? checkoutKeyHash(body.checkoutKey)
+    : null;
+  const db = getSupabaseAdmin();
+  let reference = suppliedReference;
+  let lock: string | null = null;
+
   try {
-    stripe = getStripe();
-  } catch (err) {
-    console.error("Checkout: Stripe is not configured", err);
-    return NextResponse.json({ error: "Payments are not configured" }, { status: 500 });
-  }
-  const supabase = getSupabaseAdmin();
+    const stripe = getStripe();
+    const recovery = body.recoveryToken != null;
+    if (recovery && (!reference || readRecoveryToken(body.recoveryToken) !== reference)) {
+      return NextResponse.json({ error: "Invalid recovery link", code: "RECOVERY_UNAVAILABLE" }, { status: 404 });
+    }
 
-  let reference: string = REFERENCE_RE.test(body?.reference ?? "") ? body.reference : `MCB-${Date.now()}`;
+    if (!reference && keyHash) {
+      const { data, error } = await db.from("orders")
+        .select("reference")
+        .eq("checkout_key_hash", keyHash)
+        .maybeSingle();
+      if (error) throw error;
+      reference = data?.reference ?? null;
+    }
 
-  const { data: existing, error: lookupError } = await supabase
-    .from("orders")
-    .select("status,stripe_session_id")
-    .eq("reference", reference)
-    .maybeSingle();
-  if (lookupError) {
-    console.error("Checkout: failed to look up order", lookupError);
-    return NextResponse.json({ error: "Could not prepare the order" }, { status: 500 });
-  }
+    if (!reference) {
+      reference = `MCB-${Date.now()}${randomInt(100000, 1000000)}`;
+      const { error } = await db.from("orders")
+        .insert({ reference, status: "PENDING", checkout_key_hash: keyHash, ...fields });
+      if (error?.code === "23505") {
+        return NextResponse.json({ error: "Checkout already starting" }, { status: 409 });
+      }
+      if (error) throw error;
+    }
 
-  // Set when this order already has a session from an earlier attempt; closed further down,
-  // once the new session is stored on the order.
-  let previousSessionId: string | null = null;
-
-  if (existing && existing.status === "PENDING") {
-    const { error } = await supabase
-      .from("orders")
-      .update({ ...fields, updated_at: new Date().toISOString() })
+    // Authorize before reserving the order and check again while holding the lock.
+    const { data: candidate, error: lookupError } = await db.from("orders")
+      .select("checkout_key_hash,customer_email")
       .eq("reference", reference)
-      .eq("status", "PENDING");
-    if (error) {
-      console.error("Checkout: failed to update pending order", error);
-      return NextResponse.json({ error: "Could not prepare the order" }, { status: 500 });
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    const ownsOrder = (order: { checkout_key_hash: string | null; customer_email: string }) => recovery ||
+      (order.checkout_key_hash ? order.checkout_key_hash === keyHash : order.customer_email === shipping.email);
+    if (!candidate || !ownsOrder(candidate)) {
+      return NextResponse.json({ error: "Checkout unavailable", code: "RECOVERY_UNAVAILABLE" }, { status: 404 });
     }
-    previousSessionId = existing.stripe_session_id;
-  } else {
-    if (existing) reference = `MCB-${Date.now()}`;
-    const { error } = await supabase.from("orders").insert({ reference, status: "PENDING", ...fields });
-    if (error) {
-      console.error("Checkout: failed to create order", error);
-      return NextResponse.json({ error: "Could not prepare the order" }, { status: 500 });
+
+    lock = await claimOrderAction(db, reference);
+    if (!lock) return NextResponse.json({ error: "Checkout already starting" }, { status: 409 });
+
+    const { data: order, error: orderError } = await db.from("orders")
+      .select("status,stripe_session_id,checkout_key_hash,customer_email,checkout_cart,dose_qty,created_at,reminder_attempt")
+      .eq("reference", reference)
+      .eq("checkout_locked_until", lock)
+      .single();
+    if (orderError) throw orderError;
+    if (!ownsOrder(order) || (recovery && (!order.reminder_attempt || await hasLaterLegacyCheckout(db, order)))) {
+      return NextResponse.json({ error: "Checkout unavailable", code: "RECOVERY_UNAVAILABLE" }, { status: 404 });
     }
-  }
 
-  // Shown on the payment in the Stripe dashboard, so where to ship it is visible there too
-  // (the address itself was collected on our form, not on Stripe's page).
-  const shipTo = [shipping.address, shipping.apt, shipping.city, shipping.department, shipping.country, shipping.postalCode]
-    .filter(Boolean)
-    .join(", ");
-  const metadata = { reference, ship_to: `${shipping.name} — ${shipTo}`.slice(0, 500) };
+    const site = getSiteUrl(req);
+    if (order.stripe_session_id) {
+      const previous = await stripe.checkout.sessions.retrieve(order.stripe_session_id);
+      if (previous.payment_status === "paid" || (previous.status === "complete" && order.status !== "DECLINED")) {
+        return NextResponse.json({ url: `${site}/checkout/gracias?session_id=${previous.id}`, reference });
+      }
+      if (["PENDING", "EXPIRED", "DECLINED"].includes(order.status) && previous.status === "open") {
+        // Close the old session before the new URL can be made payable.
+        await stripe.checkout.sessions.expire(previous.id);
+      }
+    }
+    if (!["PENDING", "EXPIRED", "DECLINED"].includes(order.status)) {
+      return NextResponse.json({ error: "Checkout unavailable" }, { status: 409 });
+    }
 
-  const site = getSiteUrl(req);
-  let session;
-  try {
-    session = await stripe.checkout.sessions.create({
+    // Stripe's dashboard uses this metadata to show where to ship the order.
+    const shipTo = [shipping.address, shipping.apt, shipping.city, shipping.department, shipping.country, shipping.postalCode]
+      .filter(Boolean)
+      .join(", ");
+    const metadata = { reference, ship_to: `${shipping.name} — ${shipTo}`.slice(0, 500) };
+    const session = await stripe.checkout.sessions.create({
       mode: "payment",
       locale,
       customer_email: shipping.email,
@@ -156,30 +179,31 @@ export async function POST(req: Request) {
       success_url: `${site}/checkout/gracias?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${site}/checkout`,
     });
-  } catch (err) {
-    console.error("Checkout: failed to create Stripe session", err);
-    return NextResponse.json({ error: "Could not start the payment" }, { status: 502 });
-  }
 
-  const { error: linkError } = await supabase
-    .from("orders")
-    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
-    .eq("reference", reference);
-  if (linkError) {
-    // The webhook finds the order by reference, so payment still works; only the
-    // "close the previous session" step on a retry is lost.
-    console.error("Checkout: failed to store session id", linkError);
-  } else if (previousSessionId) {
-    // Only one session may be payable per order, or a customer with two tabs open could pay
-    // the same order twice. It's closed only now that the order points at the new session:
-    // Stripe answers with a "session expired" event, and the webhook ignores it unless it
-    // belongs to the order's current session — closing it earlier would mark the order
-    // EXPIRED while its new session is still open.
-    await stripe.checkout.sessions.expire(previousSessionId).catch(() => {});
-  }
+    const { data: linked, error: linkError } = await db.from("orders")
+      .update({
+        ...fields,
+        status: "PENDING",
+        checkout_key_hash: order.checkout_key_hash ?? keyHash,
+        stripe_session_id: session.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("reference", reference)
+      .eq("checkout_locked_until", lock)
+      .in("status", ["PENDING", "EXPIRED", "DECLINED"])
+      .select("reference")
+      .maybeSingle();
+    if (linkError || !linked || !session.url) {
+      await stripe.checkout.sessions.expire(session.id).catch(() => {});
+      if (linkError) throw linkError;
+      return NextResponse.json({ error: "Could not start the payment" }, { status: 502 });
+    }
 
-  if (!session.url) {
+    return NextResponse.json({ url: session.url, reference });
+  } catch (error) {
+    console.error("Checkout: could not start payment", { reference, error: error instanceof Error ? error.name : "database" });
     return NextResponse.json({ error: "Could not start the payment" }, { status: 502 });
+  } finally {
+    if (reference && lock) await releaseOrderAction(db, reference, lock);
   }
-  return NextResponse.json({ url: session.url, reference });
 }

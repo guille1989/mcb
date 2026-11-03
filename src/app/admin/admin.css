@@ -249,6 +249,11 @@
   white-space: nowrap;
 }
 
+.admin-ship-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .admin-ship-btn:hover {
   background: rgba(255, 208, 0, 0.1);
 }

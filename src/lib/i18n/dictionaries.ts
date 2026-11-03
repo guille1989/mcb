@@ -97,6 +97,8 @@ export const dictionaries = {
       payment: {
         orderError: "No se pudo iniciar el pago, intenta de nuevo",
         genericError: "Ocurrió un error al iniciar el pago.",
+        recoveryUnavailable: "No pudimos retomar esta compra.",
+        startNewCheckout: "Empezar una compra nueva",
       },
     },
   },
@@ -198,6 +200,8 @@ export const dictionaries = {
       payment: {
         orderError: "Couldn't start the payment, please try again",
         genericError: "Something went wrong starting the payment.",
+        recoveryUnavailable: "We couldn't resume this purchase.",
+        startNewCheckout: "Start a new purchase",
       },
     },
   },

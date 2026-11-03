@@ -77,15 +77,15 @@ function cartSachets(cart: CartItem[]): number {
 // The cart and shipping form are saved as the customer fills them in, so leaving the page
 // (closing the tab, coming back from Stripe without paying) doesn't wipe their order. It's
 // cleared once a payment is confirmed on /checkout/gracias, and ignored after a week.
-// `reference` is the PENDING order already created for this cart, so paying again after
-// coming back updates that order instead of opening a second one.
+// The payment details let the checkout reuse the same order after a retry.
 const DRAFT_KEY = "mcb_checkout_draft";
 const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-type CheckoutDraft = { step: 1 | 3; cart: CartItem[]; shipping: ShippingData; reference: string | null };
+type PaymentDraft = { reference: string | null; checkoutKey?: string; recoveryToken?: string };
+type CheckoutDraft = PaymentDraft & { step: 1 | 3; cart: CartItem[]; shipping: ShippingData };
 
 function saveDraft(draft: CheckoutDraft) {
   try {
-    const stored = { savedAt: Date.now(), step: draft.step, cart: draft.cart.map((c) => ({ productId: c.productId, qty: c.qty })), shipping: draft.shipping, reference: draft.reference };
+    const stored = { ...draft, savedAt: Date.now(), cart: draft.cart.map((c) => ({ productId: c.productId, qty: c.qty })) };
     window.localStorage.setItem(DRAFT_KEY, JSON.stringify(stored));
   } catch {
     // storage full or blocked — checkout still works, it just won't be remembered.
@@ -102,6 +102,16 @@ function clearDraft() {
 
 // Rebuilt from the catalog rather than trusted as stored, so a stale or edited draft
 // can't bring back an unknown product or a different price.
+function restoreCart(lines: unknown): CartItem[] {
+  const cart: CartItem[] = [];
+  for (const item of Array.isArray(lines) ? lines : []) {
+    const option = SACHET_OPTIONS.find((o) => o.id === item?.productId);
+    const qty = Number.isInteger(item?.qty) ? Math.min(Math.max(item.qty, 1), MAX_PACKS_PER_ITEM) : 1;
+    if (option) cart.push({ ...toCartItem(option), qty });
+  }
+  return cart;
+}
+
 function loadDraft(): CheckoutDraft | null {
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
@@ -112,12 +122,7 @@ function loadDraft(): CheckoutDraft | null {
       return null;
     }
 
-    const cart: CartItem[] = [];
-    for (const item of Array.isArray(stored.cart) ? stored.cart : []) {
-      const option = SACHET_OPTIONS.find((o) => o.id === item?.productId);
-      const qty = Number.isInteger(item?.qty) ? Math.min(Math.max(item.qty, 1), MAX_PACKS_PER_ITEM) : 1;
-      if (option) cart.push({ ...toCartItem(option), qty });
-    }
+    const cart = restoreCart(stored.cart);
     if (cart.length === 0) return null;
 
     const shipping = { ...SHIPPING_EMPTY };
@@ -125,7 +130,9 @@ function loadDraft(): CheckoutDraft | null {
       if (typeof stored.shipping?.[key] === "string") shipping[key] = stored.shipping[key];
     }
     const reference = typeof stored.reference === "string" ? stored.reference : null;
-    return { step: stored.step === 3 ? 3 : 1, cart, shipping, reference };
+    const checkoutKey = typeof stored.checkoutKey === "string" ? stored.checkoutKey : undefined;
+    const recoveryToken = typeof stored.recoveryToken === "string" ? stored.recoveryToken : undefined;
+    return { step: stored.step === 3 ? 3 : 1, cart, shipping, reference, checkoutKey, recoveryToken };
   } catch {
     return null;
   }
@@ -427,13 +434,9 @@ function Field({ label, name, value, onChange, error, type = "text", placeholder
   );
 }
 
-// `paymentReference` is the reference of the PENDING order already created for this cart,
-// if any. Sending it back lets the server update that order instead of opening a second
-// one when the customer returns from Stripe without paying and presses pay again. It lives
-// in the parent so it also survives going back a step and returning.
-function StepShipping({ cart, setCart, origins, shipping, setShipping, paymentReference, onReferenceChange, onBack }: {
+function StepShipping({ cart, setCart, origins, shipping, setShipping, payment, onPaymentChange, onRecoveryUnavailable, onBack }: {
   cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; origins: OriginCounts; shipping: ShippingData; setShipping: React.Dispatch<React.SetStateAction<ShippingData>>;
-  paymentReference: string | null; onReferenceChange: (reference: string) => void; onBack: () => void;
+  payment: PaymentDraft; onPaymentChange: (payment: PaymentDraft) => void; onRecoveryUnavailable: () => void; onBack: () => void;
 }) {
   const [errors, setErrors] = useState<Errors>({});
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -474,7 +477,7 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, paymentRe
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reference: paymentReference,
+          ...payment,
           cart: cart.map((c) => ({ productId: c.productId, qty: c.qty })),
           origins,
           shipping,
@@ -482,11 +485,17 @@ function StepShipping({ cart, setCart, origins, shipping, setShipping, paymentRe
         }),
       });
       const data = await res.json().catch(() => null);
+      if (data?.code === "RECOVERY_UNAVAILABLE") {
+        setPaying(false);
+        onRecoveryUnavailable();
+        return;
+      }
       if (!res.ok || !data?.url) throw new Error(t.checkout.payment.orderError);
 
       // Saved right here: the draft effect wouldn't get to run before the page unloads.
-      onReferenceChange(data.reference);
-      saveDraft({ step: 3, cart, shipping, reference: data.reference });
+      const updatedPayment = { ...payment, reference: data.reference };
+      onPaymentChange(updatedPayment);
+      saveDraft({ step: 3, cart, shipping, ...updatedPayment });
 
       // `paying` stays on — this page is about to be replaced by Stripe's.
       window.location.assign(data.url);
@@ -625,29 +634,66 @@ export function CheckoutFlow() {
   // Saved drafts live in localStorage, which the server can't read, so they're restored
   // after mount; the content stays hidden until then to avoid flashing step 1.
   const [restored, setRestored] = useState(false);
-  const [paymentReference, setPaymentReference] = useState<string | null>(null);
-  const { t } = useLocale();
+  const [payment, setPayment] = useState<PaymentDraft>({ reference: null });
+  const [recoveryError, setRecoveryError] = useState(false);
+  const { t, setLocale } = useLocale();
 
   const totalSachets = cartSachets(cart);
 
   useEffect(() => {
-    // localStorage only exists in the browser, so reading it during render would mismatch the server HTML.
-    /* eslint-disable react-hooks/set-state-in-effect */
-    const draft = loadDraft();
-    if (draft) {
-      setCart(draft.cart);
-      setShipping(draft.shipping);
-      setStep(draft.step);
-      setPaymentReference(draft.reference);
+    const controller = new AbortController();
+    const token = new URLSearchParams(window.location.hash.slice(1)).get("retomar");
+
+    async function restore() {
+      const draft = loadDraft();
+      if (token) {
+        try {
+          const response = await fetch("/api/checkout/recovery", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Checkout unavailable");
+          const data = await response.json();
+          if (controller.signal.aborted) return;
+          const recoveredCart = restoreCart(data.cart);
+          if (!recoveredCart.length || typeof data.reference !== "string") throw new Error("Invalid cart");
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          setLocale(data.locale === "en" ? "en" : "es");
+          setCart(recoveredCart);
+          if (draft && draft.reference === data.reference) setShipping(draft.shipping);
+          setStep(3);
+          setPayment({ reference: data.reference, recoveryToken: token });
+          setRestored(true);
+          return;
+        } catch {
+          if (controller.signal.aborted) return;
+          setRecoveryError(true);
+        }
+      }
+
+      if (draft) {
+        setCart(draft.cart);
+        setShipping(draft.shipping);
+        setStep(draft.step);
+      }
+      setPayment({
+        reference: draft?.reference ?? null,
+        checkoutKey: draft?.checkoutKey ?? window.crypto.randomUUID?.(),
+        recoveryToken: draft?.recoveryToken,
+      });
+      setRestored(true);
     }
-    setRestored(true);
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, []);
+
+    void restore();
+    return () => controller.abort();
+  }, [setLocale]);
 
   useEffect(() => {
     if (!restored) return;
-    if (step === 1 || step === 3) saveDraft({ step, cart, shipping, reference: paymentReference });
-  }, [restored, step, cart, shipping, paymentReference]);
+    if (step === 1 || step === 3) saveDraft({ step, cart, shipping, ...payment });
+  }, [restored, step, cart, shipping, payment]);
 
   useEffect(() => {
     if (step >= 2 && cart.length === 0) setStep(1);
@@ -667,6 +713,15 @@ export function CheckoutFlow() {
   const skipToShipping = () => setStep(3);
   const huilaOnlyOrigins: OriginCounts = { ...ORIGIN_COUNTS_EMPTY, huila: totalSachets };
 
+  const startNewCheckout = () => {
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    setRecoveryError(false);
+    setCartAndResetOrigins([toCartItem(SACHET_OPTIONS[0])]);
+    setShipping(SHIPPING_EMPTY);
+    setPayment({ reference: null, checkoutKey: window.crypto.randomUUID?.() });
+    setStep(1);
+  };
+
   return (
     <>
       <div className="co-root">
@@ -676,7 +731,13 @@ export function CheckoutFlow() {
           <div className="co-topbar-spacer" />
         </div>
         <div key={step} className="co-content">
-          {restored && step === 1 && (
+          {recoveryError && (
+            <div className="co-pay-result co-pay-result--err">
+              <p role="alert">{t.checkout.payment.recoveryUnavailable}</p>
+              <button className="co-home-btn" type="button" onClick={startNewCheckout}>{t.checkout.payment.startNewCheckout}</button>
+            </div>
+          )}
+          {restored && !recoveryError && step === 1 && (
             <StepProducts
               cart={cart}
               setCart={setCartAndResetOrigins}
@@ -694,8 +755,18 @@ export function CheckoutFlow() {
               onNext={() => setStep(3)}
             />
           )}
-          {restored && step === 3 && (
-            <StepShipping cart={cart} setCart={setCart} origins={huilaOnlyOrigins} shipping={shipping} setShipping={setShipping} paymentReference={paymentReference} onReferenceChange={setPaymentReference} onBack={() => setStep(1)} />
+          {restored && !recoveryError && step === 3 && (
+            <StepShipping
+              cart={cart}
+              setCart={setCart}
+              origins={huilaOnlyOrigins}
+              shipping={shipping}
+              setShipping={setShipping}
+              payment={payment}
+              onPaymentChange={setPayment}
+              onRecoveryUnavailable={() => setRecoveryError(true)}
+              onBack={() => setStep(1)}
+            />
           )}
         </div>
       </div>

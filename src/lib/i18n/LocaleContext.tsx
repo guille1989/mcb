@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { dictionaries, type Locale, type Dictionary } from "./dictionaries";
 
 const STORAGE_KEY = "mcb_locale";
@@ -29,14 +29,14 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const setLocale = (next: Locale) => {
+  const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // Non-fatal — the choice just won't persist across visits.
     }
-  };
+  }, []);
 
   return (
     <LocaleContext.Provider value={{ locale, setLocale, t: dictionaries[locale] }}>

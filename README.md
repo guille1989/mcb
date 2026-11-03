@@ -29,6 +29,12 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Manual checkout reminders
+
+Apply `supabase/checkout_reminders.sql` after `supabase/stripe_migration.sql` and before deploying the application. Set `CHECKOUT_RECOVERY_SECRET` to a separate, randomly generated secret with at least 32 bytes. Set `SITE_URL` to the public checkout origin and use a verified sender in `RESEND_FROM_EMAIL`.
+
+In `/admin`, open an abandoned Stripe order and confirm **Enviar recordatorio**. The email link restores the cart for seven days. The panel records when Resend confirms acceptance. If a send remains unconfirmed 23 hours after the first attempt, check Resend before attempting any manual follow-up.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

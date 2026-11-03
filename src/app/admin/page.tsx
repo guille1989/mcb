@@ -7,6 +7,7 @@ type Order = {
   reference: string;
   status: string;
   wompi_transaction_id: string | null;
+  stripe_session_id: string | null;
   stripe_payment_intent_id: string | null;
   dose_qty: number;
   dose_price_eur: number;
@@ -25,6 +26,7 @@ type Order = {
   shipping_postal_code: string | null;
   notes: string | null;
   confirmation_email_sent: boolean;
+  reminder_sent_at: string | null;
   shipped: boolean;
   shipped_at: string | null;
   created_at: string;
@@ -79,6 +81,7 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [reminder, setReminder] = useState<{ reference: string; sending: boolean; error?: string } | null>(null);
   const [fetchError, setFetchError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -95,7 +98,9 @@ export default function AdminPage() {
         return;
       }
       const data = await res.json();
-      setOrders(data.orders ?? []);
+      const updatedOrders: Order[] = data.orders ?? [];
+      setOrders(updatedOrders);
+      setSelected((current) => current && (updatedOrders.find((order) => order.reference === current.reference) ?? current));
       setLastUpdated(new Date());
       setLoggedIn(true);
       setFetchError("");
@@ -144,6 +149,32 @@ export default function AdminPage() {
     await fetch("/api/admin/logout", { method: "POST" });
     setLoggedIn(false);
     setOrders([]);
+    setSelected(null);
+    setReminder(null);
+  };
+
+  const sendReminder = async (order: Order) => {
+    if (reminder?.sending || !window.confirm(`¿Enviar un recordatorio de compra a ${order.customer_email}?`)) return;
+
+    const { reference, customer_email: recipient } = order;
+    setReminder({ reference, sending: true });
+    try {
+      const res = await fetch("/api/admin/orders/reminder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference, recipient }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || typeof data?.sentAt !== "string") throw new Error(data?.error || "No se pudo confirmar el envío.");
+
+      const sentAt: string = data.sentAt;
+      const markSent = (item: Order) => item.reference === reference ? { ...item, reminder_sent_at: sentAt } : item;
+      setOrders((current) => current.map(markSent));
+      setSelected((current) => current && markSent(current));
+      setReminder(null);
+    } catch (error) {
+      setReminder({ reference, sending: false, error: error instanceof Error ? error.message : "No se pudo confirmar el envío." });
+    }
   };
 
   const toggleShipped = async (reference: string, shipped: boolean) => {
@@ -290,6 +321,24 @@ export default function AdminPage() {
               {selected.customer_phone_country ? `${selected.customer_phone_country} ` : ""}
               {selected.customer_phone}
             </p>
+
+            {selected.reminder_sent_at ? (
+              <p className="admin-muted" role="status">
+                Recordatorio enviado el {new Date(selected.reminder_sent_at).toLocaleString("es-ES")}
+              </p>
+            ) : selected.status === "EXPIRED" && selected.stripe_session_id && selected.customer_email && (
+              <button
+                type="button"
+                className="admin-ship-btn"
+                disabled={reminder?.sending}
+                onClick={() => sendReminder(selected)}
+              >
+                {reminder?.sending && reminder.reference === selected.reference ? "Enviando…" : "Enviar recordatorio"}
+              </button>
+            )}
+            {reminder?.reference === selected.reference && reminder.error && (
+              <p className="admin-login-error" role="alert">{reminder.error}</p>
+            )}
 
             <h3>Pedido</h3>
             <p>
