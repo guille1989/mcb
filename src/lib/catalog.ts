@@ -3,7 +3,7 @@
 // the browser.
 
 export const SACHET_OPTIONS = [
-  { id: 1, qty: 10, price: 25.0, tagKey: "trial" },
+  { id: 1, qty: 10, price: 15.0, tagKey: "trial" },
 ] as const;
 
 export const CURRENCY = "eur";
